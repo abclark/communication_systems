@@ -5,6 +5,8 @@ import threading
 import sys
 import ssl
 import os
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives import serialization
 
 HOST = '127.0.0.1'
 PORT = 65432
@@ -39,21 +41,23 @@ def receive_handler(sock):
         message = receive_message(sock)
         if message is None:
             print("\rConnection to server lost. Press Enter to exit.", flush=True)
-            break
+            os._exit(1)
         print(f"\r{message}\nEnter message: ", end="", flush=True)
 
 def main():
-    # Get the absolute path to the directory where the script is located
+    print("Generating ephemeral key pair for this session...")
+    private_key = rsa.generate_private_key(
+        public_exponent=65537,
+        key_size=2048,
+    )
+    public_key = private_key.public_key()
+    print("Key pair generated.")
+
     script_dir = os.path.dirname(os.path.abspath(__file__))
     cert_path = os.path.join(script_dir, 'ssl', 'cert.pem')
 
-    # Create an SSL context that trusts our self-signed certificate
     context = ssl.create_default_context(
         ssl.Purpose.SERVER_AUTH, cafile=cert_path)
-    # Since we're using a self-signed certificate with a custom hostname
-    # (localhost), we may need to disable standard hostname checking.
-    # For a real application, you would use a proper certificate with a
-    # matching hostname.
     context.check_hostname = False
     context.verify_mode = ssl.CERT_REQUIRED
 
@@ -63,7 +67,14 @@ def main():
 
     try:
         secure_sock.connect((HOST, PORT))
-        print(f"Connected to secure server at {HOST}:{PORT}. Type 'quit' to exit.", flush=True)
+        print(f"Connected to secure server at {HOST}:{PORT}.", flush=True)
+
+        public_key_pem = public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        ).decode('utf-8')
+        send_message(secure_sock, public_key_pem)
+        print("Public key registered with server. Type 'quit' to exit.", flush=True)
 
         receiver = threading.Thread(target=receive_handler, args=(secure_sock,))
         receiver.daemon = True
