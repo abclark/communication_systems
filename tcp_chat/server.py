@@ -5,6 +5,7 @@ import struct
 import time
 import ssl
 import os
+import json
 from cryptography.hazmat.primitives import serialization
 
 HOST = '127.0.0.1'
@@ -14,8 +15,9 @@ clients = {}
 client_id_counter = 0
 clients_lock = threading.Lock()
 
-def send_message(sock, message):
-    message_bytes = message.encode()
+def send_message(sock, data_dict):
+    message_json = json.dumps(data_dict)
+    message_bytes = message_json.encode('utf-8')
     length_prefix = struct.pack('>I', len(message_bytes))
     try:
         sock.sendall(length_prefix + message_bytes)
@@ -39,15 +41,15 @@ def receive_message(sock):
                 return None
             full_message.extend(chunk)
         
-        return full_message.decode()
-    except (ConnectionResetError, BrokenPipeError, struct.error):
+        return json.loads(full_message.decode('utf-8'))
+    except (ConnectionResetError, BrokenPipeError, struct.error, json.JSONDecodeError):
         return None
 
-def broadcast(message, sender_id):
+def broadcast(message_dict, sender_id):
     with clients_lock:
         for client_id, client_info in list(clients.items()):
             if client_id != sender_id:
-                if not send_message(client_info["socket"], message):
+                if not send_message(client_info["socket"], message_dict):
                     del clients[client_id]
                     client_info["socket"].close()
                     print(f"Removed disconnected client User {client_id} during broadcast.", flush=True)
@@ -57,11 +59,15 @@ def client_handler(conn, addr):
     client_id = None
     
     try:
-        serialized_public_key = receive_message(conn)
-        if serialized_public_key is None:
+        initial_message = receive_message(conn)
+        if initial_message is None or initial_message.get("type") != "register":
             return
 
-        public_key = serialization.load_pem_public_key(serialized_public_key.encode())
+        public_key_pem = initial_message.get("pubkey")
+        if not public_key_pem:
+            return
+
+        public_key = serialization.load_pem_public_key(public_key_pem.encode('utf-8'))
 
         with clients_lock:
             client_id_counter += 1
@@ -70,18 +76,34 @@ def client_handler(conn, addr):
         
         print(f"Client {addr} registered as User {client_id}", flush=True)
 
-        broadcast_message = f"User {client_id} has joined the chat!"
-        broadcast(broadcast_message, None)
-        print(broadcast_message, flush=True)
+        notification = {"type": "notification", "content": f"User {client_id} has joined the chat!"}
+        broadcast(notification, None)
+        print(f"Broadcasting: {notification['content']}", flush=True)
+
+        if client_id > 1:
+            with clients_lock:
+                leader_info = clients.get(1)
+            if leader_info:
+                leader_notification = {
+                    "type": "new_user_joined",
+                    "id": client_id,
+                    "pubkey": public_key_pem
+                }
+                send_message(leader_info["socket"], leader_notification)
 
         while True:
-            received_message = receive_message(conn)
-            if received_message is None:
+            msg_dict = receive_message(conn)
+            if msg_dict is None:
                 break
             
-            full_message_to_broadcast = f"[User {client_id}] {received_message}"
-            print(f"Broadcasting from User {client_id}: {received_message}", flush=True)
-            broadcast(full_message_to_broadcast, client_id)
+            if msg_dict.get("type") == "chat":
+                broadcast_dict = {
+                    "type": "chat_message",
+                    "sender_id": client_id,
+                    "content": msg_dict.get("content", "")
+                }
+                print(f"Broadcasting from User {client_id}: {msg_dict.get('content')}", flush=True)
+                broadcast(broadcast_dict, client_id)
             
     finally:
         with clients_lock:
@@ -89,9 +111,9 @@ def client_handler(conn, addr):
                 del clients[client_id]
         
         if client_id:
-            broadcast_message = f"User {client_id} has left the chat."
-            broadcast(broadcast_message, None)
-            print(broadcast_message, flush=True)
+            notification = {"type": "notification", "content": f"User {client_id} has left the chat."}
+            broadcast(notification, None)
+            print(f"Broadcasting: {notification['content']}", flush=True)
         
         conn.close()
         print(f"Client {addr} (User {client_id}) handler finished.", flush=True)

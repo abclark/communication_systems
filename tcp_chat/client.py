@@ -5,16 +5,22 @@ import threading
 import sys
 import ssl
 import os
+import json
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
 
 HOST = '127.0.0.1'
 PORT = 65432
 
-def send_message(sock, message):
-    message_bytes = message.encode()
+def send_message(sock, data_dict):
+    message_json = json.dumps(data_dict)
+    message_bytes = message_json.encode('utf-8')
     length_prefix = struct.pack('>I', len(message_bytes))
-    sock.sendall(length_prefix + message_bytes)
+    try:
+        sock.sendall(length_prefix + message_bytes)
+    except (BrokenPipeError, ConnectionResetError):
+        return False
+    return True
 
 def receive_message(sock):
     try:
@@ -32,17 +38,32 @@ def receive_message(sock):
                 return None
             full_message.extend(chunk)
         
-        return full_message.decode()
-    except (ConnectionResetError, struct.error):
+        return json.loads(full_message.decode('utf-8'))
+    except (ConnectionResetError, BrokenPipeError, struct.error, json.JSONDecodeError):
         return None
 
 def receive_handler(sock):
     while True:
-        message = receive_message(sock)
-        if message is None:
+        msg_dict = receive_message(sock)
+        if msg_dict is None:
             print("\rConnection to server lost. Press Enter to exit.", flush=True)
             os._exit(1)
-        print(f"\r{message}\nEnter message: ", end="", flush=True)
+
+        msg_type = msg_dict.get("type")
+        
+        if msg_type == "chat_message":
+            sender_id = msg_dict.get("sender_id")
+            content = msg_dict.get("content")
+            display_message = f"[User {sender_id}] {content}"
+        elif msg_type == "notification":
+            display_message = f"[{msg_dict.get('content')}]"
+        elif msg_type == "new_user_joined":
+            user_id = msg_dict.get("id")
+            display_message = f"[SERVER] New user {user_id} joined. Received their public key. (Key distribution not yet implemented)"
+        else:
+            display_message = f"[UNHANDLED] {msg_dict}"
+        
+        print(f"\r{display_message}\nEnter message: ", end="", flush=True)
 
 def main():
     print("Generating ephemeral key pair for this session...")
@@ -61,7 +82,6 @@ def main():
     context.check_hostname = False
     context.verify_mode = ssl.CERT_REQUIRED
 
-
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     secure_sock = context.wrap_socket(client_socket, server_hostname=HOST)
 
@@ -73,7 +93,12 @@ def main():
             encoding=serialization.Encoding.PEM,
             format=serialization.PublicFormat.SubjectPublicKeyInfo
         ).decode('utf-8')
-        send_message(secure_sock, public_key_pem)
+        
+        registration_message = {
+            "type": "register",
+            "pubkey": public_key_pem
+        }
+        send_message(secure_sock, registration_message)
         print("Public key registered with server. Type 'quit' to exit.", flush=True)
 
         receiver = threading.Thread(target=receive_handler, args=(secure_sock,))
@@ -81,12 +106,16 @@ def main():
         receiver.start()
 
         while True:
-            message_to_send = input() 
+            message_to_send = input("Enter message: ") 
             if message_to_send.lower() == 'quit':
                 break
             
             if receiver.is_alive():
-                send_message(secure_sock, message_to_send)
+                chat_message = {
+                    "type": "chat",
+                    "content": message_to_send
+                }
+                send_message(secure_sock, chat_message)
             else:
                 break
 
