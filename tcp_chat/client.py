@@ -1,4 +1,3 @@
-# client.py
 import socket
 import struct
 import threading
@@ -11,6 +10,11 @@ from cryptography.hazmat.primitives import serialization
 
 HOST = '127.0.0.1'
 PORT = 65432
+
+my_id = None
+k_group = None
+other_clients_pubkeys = {}
+registration_complete = threading.Event()
 
 def send_message(sock, data_dict):
     message_json = json.dumps(data_dict)
@@ -43,14 +47,31 @@ def receive_message(sock):
         return None
 
 def receive_handler(sock):
+    global my_id, k_group
+
     while True:
         msg_dict = receive_message(sock)
         if msg_dict is None:
             print("\rConnection to server lost. Press Enter to exit.", flush=True)
+            registration_complete.set()
             os._exit(1)
 
         msg_type = msg_dict.get("type")
-        
+
+        if not registration_complete.is_set():
+            if msg_type == "registration_success":
+                my_id = msg_dict.get("id")
+                print(f"Registered with server as User {my_id}.", flush=True)
+                if my_id == 1:
+                    print("This client is the group leader. Generating group key...", flush=True)
+                    k_group = os.urandom(32)
+                registration_complete.set()
+            else:
+                print(f"Expected registration_success message, but got {msg_type}. Exiting.", flush=True)
+                registration_complete.set()
+                os._exit(1)
+            continue
+
         if msg_type == "chat_message":
             sender_id = msg_dict.get("sender_id")
             content = msg_dict.get("content")
@@ -66,6 +87,7 @@ def receive_handler(sock):
         print(f"\r{display_message}\nEnter message: ", end="", flush=True)
 
 def main():
+    global my_id, k_group
     print("Generating ephemeral key pair for this session...")
     private_key = rsa.generate_private_key(
         public_exponent=65537,
@@ -89,6 +111,10 @@ def main():
         secure_sock.connect((HOST, PORT))
         print(f"Connected to secure server at {HOST}:{PORT}.", flush=True)
 
+        receiver = threading.Thread(target=receive_handler, args=(secure_sock,))
+        receiver.daemon = True
+        receiver.start()
+
         public_key_pem = public_key.public_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PublicFormat.SubjectPublicKeyInfo
@@ -99,11 +125,12 @@ def main():
             "pubkey": public_key_pem
         }
         send_message(secure_sock, registration_message)
-        print("Public key registered with server. Type 'quit' to exit.", flush=True)
+        
+        registration_complete.wait()
 
-        receiver = threading.Thread(target=receive_handler, args=(secure_sock,))
-        receiver.daemon = True
-        receiver.start()
+        if my_id is None:
+            print("Client registration failed. Exiting.", flush=True)
+            return
 
         while True:
             message_to_send = input("Enter message: ") 

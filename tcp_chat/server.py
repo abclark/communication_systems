@@ -76,6 +76,9 @@ def client_handler(conn, addr):
         
         print(f"Client {addr} registered as User {client_id}", flush=True)
 
+        reg_success_message = {"type": "registration_success", "id": client_id}
+        send_message(conn, reg_success_message)
+
         notification = {"type": "notification", "content": f"User {client_id} has joined the chat!"}
         broadcast(notification, None)
         print(f"Broadcasting: {notification['content']}", flush=True)
