@@ -99,15 +99,22 @@ def client_handler(conn, addr):
             if msg_dict is None:
                 break
             
-            if msg_dict.get("type") == "chat":
-                broadcast_dict = {
-                    "type": "chat_message",
-                    "sender_id": client_id,
-                    "content": msg_dict.get("content", "")
-                }
-                print(f"Broadcasting from User {client_id}: {msg_dict.get('content')}", flush=True)
-                broadcast(broadcast_dict, client_id)
+            msg_type = msg_dict.get("type")
+
+            if msg_type == "chat_encrypted":
+                msg_dict["sender_id"] = client_id
+                print(f"Relaying encrypted message from User {client_id}", flush=True)
+                broadcast(msg_dict, client_id)
             
+            elif msg_type == "group_key_distribution":
+                recipient_id = msg_dict.get("recipient_id")
+                with clients_lock:
+                    recipient_info = clients.get(recipient_id)
+                
+                if recipient_info:
+                    print(f"Relaying group key from User {client_id} to User {recipient_id}", flush=True)
+                    send_message(recipient_info["socket"], msg_dict)
+
     finally:
         with clients_lock:
             if client_id and client_id in clients:

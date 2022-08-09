@@ -8,6 +8,7 @@ import json
 import base64
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 HOST = '127.0.0.1'
 PORT = 65432
@@ -71,10 +72,21 @@ def receive_handler(sock, private_key):
             continue
 
         display_message = ""
-        if msg_type == "chat_message":
-            sender_id = msg_dict.get("sender_id")
-            content = msg_dict.get("content")
-            display_message = f"[User {sender_id}] {content}"
+        if msg_type == "chat_encrypted":
+            if k_group:
+                try:
+                    sender_id = msg_dict.get("sender_id")
+                    nonce = base64.b64decode(msg_dict.get("nonce"))
+                    ciphertext = base64.b64decode(msg_dict.get("ciphertext"))
+                    
+                    aesgcm = AESGCM(k_group)
+                    decrypted_content = aesgcm.decrypt(nonce, ciphertext, None).decode('utf-8')
+                    display_message = f"[User {sender_id}] {decrypted_content}"
+                except Exception as e:
+                    display_message = f"[DECRYPTION ERROR from User {sender_id}]"
+            else:
+                display_message = "[Message received, but I don't have the group key to decrypt it yet.]"
+
         elif msg_type == "notification":
             display_message = f"[{msg_dict.get('content')}]"
         elif msg_type == "new_user_joined" and my_id == 1:
@@ -85,10 +97,7 @@ def receive_handler(sock, private_key):
             new_pub_key = serialization.load_pem_public_key(pubkey_pem.encode('utf-8'))
             other_clients_pubkeys[user_id] = new_pub_key
             
-            encrypted_k_group = new_pub_key.encrypt(
-                k_group,
-                padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None)
-            )
+            encrypted_k_group = new_pub_key.encrypt(k_group, padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None))
             encoded_key = base64.b64encode(encrypted_k_group).decode('utf-8')
 
             key_dist_msg = {"type": "group_key_distribution", "recipient_id": user_id, "key": encoded_key}
@@ -100,10 +109,7 @@ def receive_handler(sock, private_key):
                 print("\r[SERVER] Received encrypted group key from leader.", flush=True)
                 encoded_key = msg_dict.get("key")
                 encrypted_k_group = base64.b64decode(encoded_key)
-                k_group = private_key.decrypt(
-                    encrypted_k_group,
-                    padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None)
-                )
+                k_group = private_key.decrypt(encrypted_k_group, padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None))
                 display_message = "[Group key received and decrypted successfully!]"
         else:
             display_message = f"[UNHANDLED] {msg_dict}"
@@ -136,10 +142,7 @@ def main():
         receiver.daemon = True
         receiver.start()
 
-        public_key_pem = public_key.public_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo
-        ).decode('utf-8')
+        public_key_pem = public_key.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo).decode('utf-8')
         
         registration_message = {"type": "register", "pubkey": public_key_pem}
         send_message(secure_sock, registration_message)
@@ -156,8 +159,19 @@ def main():
                 break
             
             if receiver.is_alive():
-                chat_message = {"type": "chat", "content": message_to_send}
-                send_message(secure_sock, chat_message)
+                if k_group:
+                    nonce = os.urandom(12)
+                    aesgcm = AESGCM(k_group)
+                    encrypted_content = aesgcm.encrypt(nonce, message_to_send.encode('utf-8'), None)
+                    
+                    chat_message = {
+                        "type": "chat_encrypted",
+                        "nonce": base64.b64encode(nonce).decode('utf-8'),
+                        "ciphertext": base64.b64encode(encrypted_content).decode('utf-8')
+                    }
+                    send_message(secure_sock, chat_message)
+                else:
+                    print("Cannot send message: group key not yet established.", flush=True)
             else:
                 break
 
