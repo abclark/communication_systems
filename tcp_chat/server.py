@@ -16,6 +16,10 @@ class ChatServer:
         self.client_id_counter = 0
         self.clients_lock = threading.Lock()
         self.server_socket = None
+        self.message_handlers = {
+            "chat_encrypted": self._handle_chat_encrypted,
+            "group_key_distribution": self._handle_group_key_distribution
+        }
 
     def _send_message(self, sock, data_dict):
         message_json = json.dumps(data_dict)
@@ -50,6 +54,19 @@ class ChatServer:
                         del self.clients[client_id]
                         client_info["socket"].close()
                         print(f"Removed disconnected client User {client_id} during broadcast.", flush=True)
+
+    def _handle_chat_encrypted(self, msg_dict, client_id):
+        msg_dict["sender_id"] = client_id
+        print(f"Relaying encrypted message from User {client_id}", flush=True)
+        self._broadcast(msg_dict, client_id)
+
+    def _handle_group_key_distribution(self, msg_dict, client_id):
+        recipient_id = msg_dict.get("recipient_id")
+        with self.clients_lock:
+            recipient_info = self.clients.get(recipient_id)
+        if recipient_info:
+            print(f"Relaying group key from User {client_id} to User {recipient_id}", flush=True)
+            self._send_message(recipient_info["socket"], msg_dict)
 
     def _client_handler(self, conn, addr):
         client_id = None
@@ -86,17 +103,12 @@ class ChatServer:
                 if msg_dict is None: break
                 
                 msg_type = msg_dict.get("type")
-                if msg_type == "chat_encrypted":
-                    msg_dict["sender_id"] = client_id
-                    print(f"Relaying encrypted message from User {client_id}", flush=True)
-                    self._broadcast(msg_dict, client_id)
-                elif msg_type == "group_key_distribution":
-                    recipient_id = msg_dict.get("recipient_id")
-                    with self.clients_lock:
-                        recipient_info = self.clients.get(recipient_id)
-                    if recipient_info:
-                        print(f"Relaying group key from User {client_id} to User {recipient_id}", flush=True)
-                        self._send_message(recipient_info["socket"], msg_dict)
+                handler = self.message_handlers.get(msg_type)
+                
+                if handler:
+                    handler(msg_dict, client_id)
+                else:
+                    print(f"Received unhandled message type from User {client_id}: {msg_type}", flush=True)
         finally:
             with self.clients_lock:
                 if client_id and client_id in self.clients:

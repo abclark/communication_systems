@@ -22,6 +22,12 @@ class ChatClient:
         self.public_key = None
         self.sock = None
         self.receiver_thread = None
+        self.message_handlers = {
+            "chat_encrypted": self._handle_encrypted_chat,
+            "notification": self._handle_notification,
+            "new_user_joined": self._handle_new_user,
+            "group_key_distribution": self._handle_key_distribution
+        }
 
     def _generate_keys(self):
         print("Generating ephemeral key pair for this session...")
@@ -62,38 +68,33 @@ class ChatClient:
                 self.registration_complete.set()
                 os._exit(1)
 
-            msg_type = msg_dict.get("type")
-
             if not self.registration_complete.is_set():
-                if msg_type == "registration_success":
-                    self.my_id = msg_dict.get("id")
-                    print(f"Registered with server as User {self.my_id}.", flush=True)
-                    if self.my_id == 1:
-                        print("This client is the group leader. Generating group key...", flush=True)
-                        self.k_group = os.urandom(32)
-                    self.registration_complete.set()
-                else:
-                    print(f"Expected registration_success message, but got {msg_type}. Exiting.", flush=True)
-                    self.registration_complete.set()
-                    os._exit(1)
+                self._handle_registration(msg_dict)
                 continue
 
-            display_message = ""
-            if msg_type == "chat_encrypted":
-                self._handle_encrypted_chat(msg_dict)
-            elif msg_type == "notification":
-                display_message = f"[{msg_dict.get('content')}]"
-            elif msg_type == "new_user_joined" and self.my_id == 1:
-                display_message = self._handle_new_user(msg_dict)
-            elif msg_type == "group_key_distribution":
-                display_message = self._handle_key_distribution(msg_dict)
-            else:
-                display_message = f"[UNHANDLED] {msg_dict}"
+            msg_type = msg_dict.get("type")
+            handler = self.message_handlers.get(msg_type)
             
-            if display_message:
-                print(f"\r{display_message}\nEnter message: ", end="", flush=True)
+            if handler:
+                handler(msg_dict)
+            else:
+                self._handle_unhandled(msg_dict)
+
+    def _handle_registration(self, msg_dict):
+        if msg_dict.get("type") == "registration_success":
+            self.my_id = msg_dict.get("id")
+            print(f"Registered with server as User {self.my_id}.", flush=True)
+            if self.my_id == 1:
+                print("This client is the group leader. Generating group key...", flush=True)
+                self.k_group = os.urandom(32)
+            self.registration_complete.set()
+        else:
+            print(f"Expected registration_success message, but got {msg_dict.get('type')}. Exiting.", flush=True)
+            self.registration_complete.set()
+            os._exit(1)
 
     def _handle_encrypted_chat(self, msg_dict):
+        display_message = ""
         if self.k_group:
             try:
                 sender_id = msg_dict.get("sender_id")
@@ -103,13 +104,18 @@ class ChatClient:
                 aesgcm = AESGCM(self.k_group)
                 decrypted_content = aesgcm.decrypt(nonce, ciphertext, None).decode('utf-8')
                 display_message = f"[User {sender_id}] {decrypted_content}"
-                print(f"\r{display_message}\nEnter message: ", end="", flush=True)
             except Exception:
-                print(f"\r[DECRYPTION ERROR from User {sender_id}]\nEnter message: ", end="", flush=True)
+                display_message = f"[DECRYPTION ERROR from User {sender_id}]"
         else:
-            print("\r[Message received, but I don't have the group key to decrypt it yet.]\nEnter message: ", end="", flush=True)
+            display_message = "[Message received, but I don't have the group key to decrypt it yet.]"
+        print(f"\r{display_message}\nEnter message: ", end="", flush=True)
+
+    def _handle_notification(self, msg_dict):
+        display_message = f"[{msg_dict.get('content')}]"
+        print(f"\r{display_message}\nEnter message: ", end="", flush=True)
 
     def _handle_new_user(self, msg_dict):
+        if self.my_id != 1: return
         user_id = msg_dict.get("id")
         pubkey_pem = msg_dict.get("pubkey")
         print(f"\r[SERVER] New user {user_id} joined. Distributing group key...", flush=True)
@@ -122,7 +128,8 @@ class ChatClient:
 
         key_dist_msg = {"type": "group_key_distribution", "recipient_id": user_id, "key": encoded_key}
         self._send_message(key_dist_msg)
-        return f"[Sent group key to User {user_id}]"
+        display_message = f"[Sent group key to User {user_id}]"
+        print(f"\r{display_message}\nEnter message: ", end="", flush=True)
 
     def _handle_key_distribution(self, msg_dict):
         if msg_dict.get("recipient_id") == self.my_id:
@@ -130,18 +137,20 @@ class ChatClient:
             encoded_key = msg_dict.get("key")
             encrypted_k_group = base64.b64decode(encoded_key)
             self.k_group = self.private_key.decrypt(encrypted_k_group, padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None))
-            return "[Group key received and decrypted successfully!]"
-        return ""
+            display_message = "[Group key received and decrypted successfully!]"
+            print(f"\r{display_message}\nEnter message: ", end="", flush=True)
+
+    def _handle_unhandled(self, msg_dict):
+        display_message = f"[UNHANDLED] {msg_dict}"
+        print(f"\r{display_message}\nEnter message: ", end="", flush=True)
 
     def start(self):
         self._generate_keys()
-        
         script_dir = os.path.dirname(os.path.abspath(__file__))
         cert_path = os.path.join(script_dir, 'ssl', 'cert.pem')
         context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH, cafile=cert_path)
         context.check_hostname = False
         context.verify_mode = ssl.CERT_REQUIRED
-
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock = context.wrap_socket(client_socket, server_hostname=self.host)
 
@@ -156,7 +165,6 @@ class ChatClient:
             public_key_pem = self.public_key.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo).decode('utf-8')
             registration_message = {"type": "register", "pubkey": public_key_pem}
             self._send_message(registration_message)
-            
             self.registration_complete.wait()
 
             if self.my_id is None:
@@ -172,12 +180,7 @@ class ChatClient:
                         nonce = os.urandom(12)
                         aesgcm = AESGCM(self.k_group)
                         encrypted_content = aesgcm.encrypt(nonce, message_to_send.encode('utf-8'), None)
-                        
-                        chat_message = {
-                            "type": "chat_encrypted",
-                            "nonce": base64.b64encode(nonce).decode('utf-8'),
-                            "ciphertext": base64.b64encode(encrypted_content).decode('utf-8')
-                        }
+                        chat_message = {"type": "chat_encrypted", "nonce": base64.b64encode(nonce).decode('utf-8'), "ciphertext": base64.b64encode(encrypted_content).decode('utf-8')}
                         self._send_message(chat_message)
                     else:
                         print("Cannot send message: group key not yet established.", flush=True)
