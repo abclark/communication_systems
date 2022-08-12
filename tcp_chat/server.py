@@ -1,12 +1,12 @@
 # server.py
 import socket
 import threading
-import struct
 import time
 import ssl
 import os
 import json
 from cryptography.hazmat.primitives import serialization
+import protocol
 
 class ChatServer:
     def __init__(self, host='127.0.0.1', port=65432):
@@ -21,36 +21,11 @@ class ChatServer:
             "group_key_distribution": self._handle_group_key_distribution
         }
 
-    def _send_message(self, sock, data_dict):
-        message_json = json.dumps(data_dict)
-        message_bytes = message_json.encode('utf-8')
-        length_prefix = struct.pack('>I', len(message_bytes))
-        try:
-            sock.sendall(length_prefix + message_bytes)
-            return True
-        except (BrokenPipeError, ConnectionResetError):
-            return False
-
-    def _receive_message(self, sock):
-        try:
-            raw_length = sock.recv(4)
-            if not raw_length: return None
-            message_length = struct.unpack('>I', raw_length)[0]
-            full_message = bytearray()
-            while len(full_message) < message_length:
-                remaining_bytes = message_length - len(full_message)
-                chunk = sock.recv(min(4096, remaining_bytes))
-                if not chunk: return None
-                full_message.extend(chunk)
-            return json.loads(full_message.decode('utf-8'))
-        except (ConnectionResetError, BrokenPipeError, struct.error, json.JSONDecodeError):
-            return None
-
     def _broadcast(self, message_dict, sender_id):
         with self.clients_lock:
             for client_id, client_info in list(self.clients.items()):
                 if client_id != sender_id:
-                    if not self._send_message(client_info["socket"], message_dict):
+                    if not protocol.send_message(client_info["socket"], message_dict):
                         del self.clients[client_id]
                         client_info["socket"].close()
                         print(f"Removed disconnected client User {client_id} during broadcast.", flush=True)
@@ -66,12 +41,12 @@ class ChatServer:
             recipient_info = self.clients.get(recipient_id)
         if recipient_info:
             print(f"Relaying group key from User {client_id} to User {recipient_id}", flush=True)
-            self._send_message(recipient_info["socket"], msg_dict)
+            protocol.send_message(recipient_info["socket"], msg_dict)
 
     def _client_handler(self, conn, addr):
         client_id = None
         try:
-            initial_message = self._receive_message(conn)
+            initial_message = protocol.receive_message(conn)
             if initial_message is None or initial_message.get("type") != "register": return
 
             public_key_pem = initial_message.get("pubkey")
@@ -85,7 +60,7 @@ class ChatServer:
                 self.clients[client_id] = {"socket": conn, "pubkey": public_key}
             
             print(f"Client {addr} registered as User {client_id}", flush=True)
-            self._send_message(conn, {"type": "registration_success", "id": client_id})
+            protocol.send_message(conn, {"type": "registration_success", "id": client_id})
 
             notification = {"type": "notification", "content": f"User {client_id} has joined the chat!"}
             self._broadcast(notification, None)
@@ -96,10 +71,10 @@ class ChatServer:
                     leader_info = self.clients.get(1)
                 if leader_info:
                     leader_notification = {"type": "new_user_joined", "id": client_id, "pubkey": public_key_pem}
-                    self._send_message(leader_info["socket"], leader_notification)
+                    protocol.send_message(leader_info["socket"], leader_notification)
 
             while True:
-                msg_dict = self._receive_message(conn)
+                msg_dict = protocol.receive_message(conn)
                 if msg_dict is None: break
                 
                 msg_type = msg_dict.get("type")

@@ -1,5 +1,4 @@
 import socket
-import struct
 import threading
 import sys
 import ssl
@@ -9,6 +8,7 @@ import base64
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+import protocol
 
 class ChatClient:
     def __init__(self, host, port):
@@ -35,34 +35,9 @@ class ChatClient:
         self.public_key = self.private_key.public_key()
         print("Key pair generated.")
 
-    def _send_message(self, data_dict):
-        message_json = json.dumps(data_dict)
-        message_bytes = message_json.encode('utf-8')
-        length_prefix = struct.pack('>I', len(message_bytes))
-        try:
-            self.sock.sendall(length_prefix + message_bytes)
-        except (BrokenPipeError, ConnectionResetError):
-            return False
-        return True
-
-    def _receive_message(self):
-        try:
-            raw_length = self.sock.recv(4)
-            if not raw_length: return None
-            message_length = struct.unpack('>I', raw_length)[0]
-            full_message = bytearray()
-            while len(full_message) < message_length:
-                remaining_bytes = message_length - len(full_message)
-                chunk = self.sock.recv(min(4096, remaining_bytes))
-                if not chunk: return None
-                full_message.extend(chunk)
-            return json.loads(full_message.decode('utf-8'))
-        except (ConnectionResetError, BrokenPipeError, struct.error, json.JSONDecodeError):
-            return None
-
     def _receive_handler(self):
         while True:
-            msg_dict = self._receive_message()
+            msg_dict = protocol.receive_message(self.sock)
             if msg_dict is None:
                 print("\rConnection to server lost. Press Enter to exit.", flush=True)
                 self.registration_complete.set()
@@ -127,7 +102,7 @@ class ChatClient:
         encoded_key = base64.b64encode(encrypted_k_group).decode('utf-8')
 
         key_dist_msg = {"type": "group_key_distribution", "recipient_id": user_id, "key": encoded_key}
-        self._send_message(key_dist_msg)
+        protocol.send_message(self.sock, key_dist_msg)
         display_message = f"[Sent group key to User {user_id}]"
         print(f"\r{display_message}\nEnter message: ", end="", flush=True)
 
@@ -164,7 +139,7 @@ class ChatClient:
 
             public_key_pem = self.public_key.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo).decode('utf-8')
             registration_message = {"type": "register", "pubkey": public_key_pem}
-            self._send_message(registration_message)
+            protocol.send_message(self.sock, registration_message)
             self.registration_complete.wait()
 
             if self.my_id is None:
@@ -181,7 +156,7 @@ class ChatClient:
                         aesgcm = AESGCM(self.k_group)
                         encrypted_content = aesgcm.encrypt(nonce, message_to_send.encode('utf-8'), None)
                         chat_message = {"type": "chat_encrypted", "nonce": base64.b64encode(nonce).decode('utf-8'), "ciphertext": base64.b64encode(encrypted_content).decode('utf-8')}
-                        self._send_message(chat_message)
+                        protocol.send_message(self.sock, chat_message)
                     else:
                         print("Cannot send message: group key not yet established.", flush=True)
                 else:
