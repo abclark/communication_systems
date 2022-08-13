@@ -85,6 +85,29 @@ def handle_tcp_packet(tun, ip_header, tcp_bytes):
                 print("   >>> Received Final ACK. Connection CLOSED.")
                 del tcp_connections[conn_key]
 
+        # 3. Unknown Connection (Closed/Listen State) - RFC 793
+        else:
+            # If the state is CLOSED (i.e., data came for an unknown connection)
+            # An incoming segment not containing a RST causes a RST to be sent in response.
+            if not (tcp_header.flags & protocols.TCP_FLAG_RST):
+                print("   >>> Unknown connection. Sending RST...")
+                
+                if tcp_header.flags & protocols.TCP_FLAG_ACK:
+                    rst_seq = tcp_header.ack_num
+                    rst_ack = 0
+                    rst_flags = protocols.TCP_FLAG_RST
+                else:
+                    rst_seq = 0
+                    rst_ack = tcp_header.seq_num + payload_len
+                    # Consume phantom bytes
+                    if tcp_header.flags & protocols.TCP_FLAG_SYN:
+                        rst_ack += 1
+                    if tcp_header.flags & protocols.TCP_FLAG_FIN:
+                        rst_ack += 1
+                    rst_flags = protocols.TCP_FLAG_RST | protocols.TCP_FLAG_ACK
+
+                send_tcp_packet(tun, ip_header, tcp_header, rst_seq, rst_ack, rst_flags)
+
     except ValueError as e:
         print(f"Error parsing TCP message: {e}", file=sys.stderr)
 
