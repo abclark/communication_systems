@@ -4,10 +4,9 @@ import sys
 import ssl
 import os
 import json
-import base64
-from cryptography.hazmat.primitives.asymmetric import rsa, padding
-from cryptography.hazmat.primitives import serialization, hashes
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives import serialization
+from crypto_helper import CryptoHelper
 import protocol
 
 class ChatClient:
@@ -15,13 +14,13 @@ class ChatClient:
         self.host = host
         self.port = port
         self.my_id = None
-        self.k_group = None
         self.other_clients_pubkeys = {}
         self.registration_complete = threading.Event()
         self.private_key = None
         self.public_key = None
         self.sock = None
         self.receiver_thread = None
+        self.crypto = None
         self.message_handlers = {
             "chat_encrypted": self._handle_encrypted_chat,
             "notification": self._handle_notification,
@@ -33,7 +32,8 @@ class ChatClient:
         print("Generating ephemeral key pair for this session...")
         self.private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         self.public_key = self.private_key.public_key()
-        print("Key pair generated.")
+        self.crypto = CryptoHelper(self.private_key)
+        print("Key pair and crypto helper generated.")
 
     def _receive_handler(self):
         while True:
@@ -61,7 +61,7 @@ class ChatClient:
             print(f"Registered with server as User {self.my_id}.", flush=True)
             if self.my_id == 1:
                 print("This client is the group leader. Generating group key...", flush=True)
-                self.k_group = os.urandom(32)
+                self.crypto.set_group_key(os.urandom(32))
             self.registration_complete.set()
         else:
             print(f"Expected registration_success message, but got {msg_dict.get('type')}. Exiting.", flush=True)
@@ -70,19 +70,19 @@ class ChatClient:
 
     def _handle_encrypted_chat(self, msg_dict):
         display_message = ""
-        if self.k_group:
-            try:
-                sender_id = msg_dict.get("sender_id")
-                nonce = base64.b64decode(msg_dict.get("nonce"))
-                ciphertext = base64.b64decode(msg_dict.get("ciphertext"))
-                
-                aesgcm = AESGCM(self.k_group)
-                decrypted_content = aesgcm.decrypt(nonce, ciphertext, None).decode('utf-8')
+        sender_id = msg_dict.get("sender_id")
+        nonce_b64 = msg_dict.get("nonce")
+        ciphertext_b64 = msg_dict.get("ciphertext")
+        
+        try:
+            decrypted_content = self.crypto.decrypt_chat_message(nonce_b64, ciphertext_b64)
+            if decrypted_content:
                 display_message = f"[User {sender_id}] {decrypted_content}"
-            except Exception:
-                display_message = f"[DECRYPTION ERROR from User {sender_id}]"
-        else:
-            display_message = "[Message received, but I don't have the group key to decrypt it yet.]"
+            else:
+                display_message = "[Message received, but group key is not set.]"
+        except Exception:
+            display_message = f"[DECRYPTION ERROR from User {sender_id}]"
+
         print(f"\r{display_message}\nEnter message: ", end="", flush=True)
 
     def _handle_notification(self, msg_dict):
@@ -98,11 +98,11 @@ class ChatClient:
         new_pub_key = serialization.load_pem_public_key(pubkey_pem.encode('utf-8'))
         self.other_clients_pubkeys[user_id] = new_pub_key
         
-        encrypted_k_group = new_pub_key.encrypt(self.k_group, padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None))
-        encoded_key = base64.b64encode(encrypted_k_group).decode('utf-8')
+        encoded_key = self.crypto.encrypt_group_key_for(self.crypto.get_group_key(), new_pub_key)
 
         key_dist_msg = {"type": "group_key_distribution", "recipient_id": user_id, "key": encoded_key}
         protocol.send_message(self.sock, key_dist_msg)
+
         display_message = f"[Sent group key to User {user_id}]"
         print(f"\r{display_message}\nEnter message: ", end="", flush=True)
 
@@ -110,8 +110,7 @@ class ChatClient:
         if msg_dict.get("recipient_id") == self.my_id:
             print("\r[SERVER] Received encrypted group key from leader.", flush=True)
             encoded_key = msg_dict.get("key")
-            encrypted_k_group = base64.b64decode(encoded_key)
-            self.k_group = self.private_key.decrypt(encrypted_k_group, padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None))
+            self.crypto.decrypt_group_key(encoded_key)
             display_message = "[Group key received and decrypted successfully!]"
             print(f"\r{display_message}\nEnter message: ", end="", flush=True)
 
@@ -151,11 +150,9 @@ class ChatClient:
                 if message_to_send.lower() == 'quit': break
                 
                 if self.receiver_thread.is_alive():
-                    if self.k_group:
-                        nonce = os.urandom(12)
-                        aesgcm = AESGCM(self.k_group)
-                        encrypted_content = aesgcm.encrypt(nonce, message_to_send.encode('utf-8'), None)
-                        chat_message = {"type": "chat_encrypted", "nonce": base64.b64encode(nonce).decode('utf-8'), "ciphertext": base64.b64encode(encrypted_content).decode('utf-8')}
+                    nonce, ciphertext = self.crypto.encrypt_chat_message(message_to_send)
+                    if nonce and ciphertext:
+                        chat_message = {"type": "chat_encrypted", "nonce": nonce, "ciphertext": ciphertext}
                         protocol.send_message(self.sock, chat_message)
                     else:
                         print("Cannot send message: group key not yet established.", flush=True)
