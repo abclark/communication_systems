@@ -48,8 +48,29 @@ class TunDevice:
         print("TunDevice: __init__ completed. A new 'utunX' interface should now exist.")
         print("  ACTION: Please check 'ifconfig' in a new terminal to identify the new 'utunX' interface (e.g., utun0, utun1).")
 
-    def read(self):
-        print("TunDevice: read() called.")
+    def read(self, size=2048):
+        if not self.sock:
+            return b''
+
+        try:
+            raw_data = self.sock.recv(size + 4)
+        except OSError as e:
+            print(f"TunDevice: Error during socket recv: {e}", file=sys.stderr)
+            return b''
+
+        if not raw_data:
+            return b''
+
+        if len(raw_data) >= 4:
+            protocol_family = struct.unpack('!I', raw_data[:4])[0]
+            
+            if protocol_family == 2:
+                return raw_data[4:]
+            elif protocol_family == 30:
+                return b''
+            else:
+                return b''
+        
         return b''
 
     def write(self, packet_bytes):
@@ -67,9 +88,20 @@ if __name__ == '__main__':
     try:
         tun = TunDevice()
         print("Stack is running (Press Ctrl+C to stop)...")
+        
+        print("\n--- ACTION REQUIRED ---")
+        print("1. Find the name of the new utun interface by running: 'ifconfig' in a separate terminal.")
+        print("2. Configure it: 'sudo ifconfig utunX 10.0.0.1 10.0.0.1 netmask 255.255.255.0 up'")
+        print("3. Send a test packet to it: 'ping -c 1 10.0.0.1'")
+        print("------------------------------------------------------------------\n")
+
         while True:
-            import time
-            time.sleep(1)
+            packet = tun.read()
+            if packet:
+                print("--- RAW IP PACKET RECEIVED ---")
+                print(packet.hex())
+                print(f"Packet Length: {len(packet)} bytes\n")
+            
     except KeyboardInterrupt:
         print("\n--- Ctrl+C detected. ---")
     except Exception as e:
