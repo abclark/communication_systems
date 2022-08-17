@@ -2,6 +2,7 @@ import sys
 import socket
 import struct
 from fcntl import ioctl
+from packet_headers import IPHeader
 
 PF_SYSTEM = 32
 SYSPROTO_CONTROL = 2
@@ -96,11 +97,16 @@ if __name__ == '__main__':
         print("------------------------------------------------------------------\n")
 
         while True:
-            packet = tun.read()
-            if packet:
-                print("--- RAW IP PACKET RECEIVED ---")
-                print(packet.hex())
-                print(f"Packet Length: {len(packet)} bytes\n")
+            packet_bytes = tun.read()
+            if packet_bytes:
+                try:
+                    ip_header = IPHeader.from_bytes(packet_bytes)
+                    print("--- PARSED IP HEADER ---")
+                    print(ip_header)
+                    print(f"Raw Packet Length: {len(packet_bytes)} bytes\n")
+                except ValueError as e:
+                    print(f"Error parsing IP header: {e}", file=sys.stderr)
+                    print(f"Raw bytes: {packet_bytes.hex()}\n")
             
     except KeyboardInterrupt:
         print("\n--- Ctrl+C detected. ---")
