@@ -45,3 +45,17 @@ class IPHeader:
         return (f"IPv{self.version} (len={self.total_length} bytes) "
                 f"from {self.src_ip} to {self.dest_ip} "
                 f"[Proto={self.protocol} TTL={self.ttl}]")
+
+class ICMPMessage:
+    def __init__(self):
+        print("ICMPMessage: __init__ called.")
+        pass
+
+    @classmethod
+    def from_bytes(cls, packet_bytes):
+        print("ICMPMessage: from_bytes called.")
+        pass
+
+    def __repr__(self):
+        print("ICMPMessage: __repr__ called.")
+        pass
