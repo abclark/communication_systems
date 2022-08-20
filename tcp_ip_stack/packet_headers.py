@@ -47,15 +47,41 @@ class IPHeader:
                 f"[Proto={self.protocol} TTL={self.ttl}]")
 
 class ICMPMessage:
-    def __init__(self):
-        print("ICMPMessage: __init__ called.")
-        pass
+    def __init__(self, type, code, checksum, identifier, sequence_number, payload):
+        self.type = type # ICMP message type (e.g., 8 for Echo Request, 0 for Echo Reply)
+        self.code = code # ICMP message code (e.g., 0 for Echo Request/Reply)
+        self.checksum = checksum # ICMP checksum
+        self.identifier = identifier # Used to match requests with replies
+        self.sequence_number = sequence_number # Used to match requests with replies
+        self.payload = payload # The actual data carried by the ICMP message (e.g., ping data)
+
 
     @classmethod
-    def from_bytes(cls, packet_bytes):
-        print("ICMPMessage: from_bytes called.")
-        pass
+    def from_bytes(cls, icmp_bytes):
+        """
+        Parses raw bytes into an ICMPMessage object.
+        """
+        if len(icmp_bytes) < 8:
+            raise ValueError("ICMP message is too short to contain a basic header (min 8 bytes).")
+
+        # Unpack the first 8 bytes of the ICMP header
+        # ! = Network (Big Endian)
+        # B = 1 byte (Type, Code)
+        # H = 2 bytes (Checksum, Identifier, Sequence Number)
+        icmp_header_tuple = struct.unpack('!BBHHH', icmp_bytes[:8])
+
+        icmp_type = icmp_header_tuple[0]
+        icmp_code = icmp_header_tuple[1]
+        icmp_checksum = icmp_header_tuple[2]
+        icmp_identifier = icmp_header_tuple[3]
+        icmp_sequence_number = icmp_header_tuple[4]
+
+        # The rest of the bytes are the ICMP payload
+        icmp_payload = icmp_bytes[8:]
+
+        return cls(icmp_type, icmp_code, icmp_checksum, icmp_identifier, icmp_sequence_number, icmp_payload)
 
     def __repr__(self):
-        print("ICMPMessage: __repr__ called.")
-        pass
+        return (f"ICMP(Type={self.type}, Code={self.code}, "
+                f"ID={self.identifier}, Seq={self.sequence_number}, "
+                f"PayloadLen={len(self.payload)} bytes)")
