@@ -2,7 +2,7 @@ import sys
 import socket
 import struct
 from fcntl import ioctl
-from packet_headers import IPHeader
+from packet_headers import IPHeader, ICMPMessage
 
 PF_SYSTEM = 32
 SYSPROTO_CONTROL = 2
@@ -85,7 +85,7 @@ class TunDevice:
 
 if __name__ == '__main__':
     print("--- Starting Stack Skeleton ---")
-    tun = None
+    tun = None 
     try:
         tun = TunDevice()
         print("Stack is running (Press Ctrl+C to stop)...")
@@ -103,9 +103,19 @@ if __name__ == '__main__':
                     ip_header = IPHeader.from_bytes(packet_bytes)
                     print("--- PARSED IP HEADER ---")
                     print(ip_header)
+                    
+                    # Calculate where the IP header ends, and the payload (ICMP) begins.
+                    ip_header_length = ip_header.ihl * 4
+
+                    if ip_header.protocol == 1: # Protocol 1 is ICMP
+                        icmp_bytes = packet_bytes[ip_header_length:]
+                        icmp_msg = ICMPMessage.from_bytes(icmp_bytes)
+                        print("--- PARSED ICMP MESSAGE ---")
+                        print(icmp_msg)
+                    
                     print(f"Raw Packet Length: {len(packet_bytes)} bytes\n")
                 except ValueError as e:
-                    print(f"Error parsing IP header: {e}", file=sys.stderr)
+                    print(f"Error parsing IP/ICMP header: {e}", file=sys.stderr)
                     print(f"Raw bytes: {packet_bytes.hex()}\n")
             
     except KeyboardInterrupt:
