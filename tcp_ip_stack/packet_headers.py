@@ -42,6 +42,42 @@ class IPHeader:
 
         return cls(version, ihl, tos, total_length, identification, flags_offset, ttl, protocol, checksum, src_ip_str, dest_ip_str)
 
+    def to_bytes(self):
+        ver_ihl = (self.version << 4) + self.ihl
+        
+        src_ip_bytes = socket.inet_aton(self.src_ip)
+        dest_ip_bytes = socket.inet_aton(self.dest_ip)
+        
+        header_without_checksum = struct.pack('!BBHHHBBH4s4s',
+            ver_ihl,
+            self.tos,
+            self.total_length,
+            self.identification,
+            self.flags_offset,
+            self.ttl,
+            self.protocol,
+            0,
+            src_ip_bytes,
+            dest_ip_bytes
+        )
+        
+        self.checksum = calculate_checksum(header_without_checksum)
+        
+        header_with_checksum = struct.pack('!BBHHHBBH4s4s',
+            ver_ihl,
+            self.tos,
+            self.total_length,
+            self.identification,
+            self.flags_offset,
+            self.ttl,
+            self.protocol,
+            self.checksum,
+            src_ip_bytes,
+            dest_ip_bytes
+        )
+        
+        return header_with_checksum
+
     def __repr__(self):
         return (f"IPv{self.version} (len={self.total_length} bytes) "
                 f"from {self.src_ip} to {self.dest_ip} "
