@@ -1,5 +1,6 @@
 import struct
 import socket
+from utils import calculate_checksum
 
 class IPHeader:
     def __init__(self, version, ihl, tos, total_length, identification, flags_offset, ttl, protocol, checksum, src_ip, dest_ip):
@@ -48,26 +49,18 @@ class IPHeader:
 
 class ICMPMessage:
     def __init__(self, type, code, checksum, identifier, sequence_number, payload):
-        self.type = type # ICMP message type (e.g., 8 for Echo Request, 0 for Echo Reply)
-        self.code = code # ICMP message code (e.g., 0 for Echo Request/Reply)
-        self.checksum = checksum # ICMP checksum
-        self.identifier = identifier # Used to match requests with replies
-        self.sequence_number = sequence_number # Used to match requests with replies
-        self.payload = payload # The actual data carried by the ICMP message (e.g., ping data)
-
+        self.type = type
+        self.code = code
+        self.checksum = checksum
+        self.identifier = identifier
+        self.sequence_number = sequence_number
+        self.payload = payload
 
     @classmethod
     def from_bytes(cls, icmp_bytes):
-        """
-        Parses raw bytes into an ICMPMessage object.
-        """
         if len(icmp_bytes) < 8:
             raise ValueError("ICMP message is too short to contain a basic header (min 8 bytes).")
 
-        # Unpack the first 8 bytes of the ICMP header
-        # ! = Network (Big Endian)
-        # B = 1 byte (Type, Code)
-        # H = 2 bytes (Checksum, Identifier, Sequence Number)
         icmp_header_tuple = struct.unpack('!BBHHH', icmp_bytes[:8])
 
         icmp_type = icmp_header_tuple[0]
@@ -76,10 +69,31 @@ class ICMPMessage:
         icmp_identifier = icmp_header_tuple[3]
         icmp_sequence_number = icmp_header_tuple[4]
 
-        # The rest of the bytes are the ICMP payload
         icmp_payload = icmp_bytes[8:]
 
         return cls(icmp_type, icmp_code, icmp_checksum, icmp_identifier, icmp_sequence_number, icmp_payload)
+
+    def to_bytes(self):
+        header_without_checksum = struct.pack('!BBHHH', 
+            self.type, 
+            self.code, 
+            0,
+            self.identifier, 
+            self.sequence_number
+        )
+        
+        checksum_input = header_without_checksum + self.payload
+        self.checksum = calculate_checksum(checksum_input)
+        
+        header_with_checksum = struct.pack('!BBHHH', 
+            self.type, 
+            self.code, 
+            self.checksum, 
+            self.identifier, 
+            self.sequence_number
+        )
+        
+        return header_with_checksum + self.payload
 
     def __repr__(self):
         return (f"ICMP(Type={self.type}, Code={self.code}, "
