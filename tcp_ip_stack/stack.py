@@ -75,8 +75,14 @@ class TunDevice:
         return b''
 
     def write(self, packet_bytes):
-        print("TunDevice: write() called.")
-        pass
+        if not self.sock:
+            return
+            
+        try:
+            header = struct.pack('!I', 2)
+            self.sock.sendall(header + packet_bytes)
+        except OSError as e:
+            print(f"TunDevice: Error writing packet: {e}", file=sys.stderr)
 
     def close(self):
         print("TunDevice: close() called.")
