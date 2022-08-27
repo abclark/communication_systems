@@ -135,3 +135,35 @@ class ICMPMessage:
         return (f"ICMP(Type={self.type}, Code={self.code}, "
                 f"ID={self.identifier}, Seq={self.sequence_number}, "
                 f"PayloadLen={len(self.payload)} bytes)")
+
+class UDPHeader:
+    def __init__(self, src_port, dest_port, length, checksum, payload):
+        self.src_port = src_port
+        self.dest_port = dest_port
+        self.length = length
+        self.checksum = checksum
+        self.payload = payload
+
+    @classmethod
+    def from_bytes(cls, udp_bytes):
+        if len(udp_bytes) < 8:
+            raise ValueError("UDP packet is too short to contain a header (min 8 bytes).")
+
+        header_tuple = struct.unpack('!HHHH', udp_bytes[:8])
+        
+        src_port = header_tuple[0]
+        dest_port = header_tuple[1]
+        length = header_tuple[2]
+        checksum = header_tuple[3]
+        
+        payload = udp_bytes[8:]
+        
+        return cls(src_port, dest_port, length, checksum, payload)
+
+    def to_bytes(self):
+        print("UDPHeader: to_bytes called.")
+        pass
+
+    def __repr__(self):
+        print("UDPHeader: __repr__ called.")
+        pass
