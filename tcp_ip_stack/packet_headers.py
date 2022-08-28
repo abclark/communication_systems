@@ -165,5 +165,5 @@ class UDPHeader:
         pass
 
     def __repr__(self):
-        print("UDPHeader: __repr__ called.")
-        pass
+        return (f"UDP(Src={self.src_port}, Dst={self.dest_port}, "
+                f"Len={self.length}, Checksum={hex(self.checksum)})")
