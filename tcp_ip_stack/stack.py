@@ -2,7 +2,7 @@ import sys
 import socket
 import struct
 from fcntl import ioctl
-from packet_headers import IPHeader, ICMPMessage
+from packet_headers import IPHeader, ICMPMessage, UDPHeader
 
 PF_SYSTEM = 32
 SYSPROTO_CONTROL = 2
@@ -118,6 +118,9 @@ class TCP_IP_Stack:
             if ip_header.protocol == 1:
                 icmp_bytes = packet_bytes[ip_header_length:]
                 self._handle_icmp(ip_header, icmp_bytes)
+            elif ip_header.protocol == 17:
+                udp_bytes = packet_bytes[ip_header_length:]
+                self._handle_udp(ip_header, udp_bytes)
             
             print(f"Raw Packet Length: {len(packet_bytes)} bytes\n")
         except ValueError as e:
@@ -161,6 +164,15 @@ class TCP_IP_Stack:
                 self.tun.write(reply_ip_bytes + reply_icmp_bytes)
         except ValueError as e:
             print(f"Error parsing ICMP message: {e}", file=sys.stderr)
+
+    def _handle_udp(self, ip_header, udp_bytes):
+        try:
+            udp_header = UDPHeader.from_bytes(udp_bytes)
+            print("--- PARSED UDP HEADER ---")
+            print(udp_header)
+            print(f"   >>> Data: {udp_header.payload.decode('utf-8', errors='replace')}")
+        except ValueError as e:
+            print(f"Error parsing UDP message: {e}", file=sys.stderr)
 
     def close(self):
         self.tun.close()
