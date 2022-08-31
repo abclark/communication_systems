@@ -160,9 +160,35 @@ class UDPHeader:
         
         return cls(src_port, dest_port, length, checksum, payload)
 
-    def to_bytes(self):
-        print("UDPHeader: to_bytes called.")
-        pass
+    def to_bytes(self, src_ip, dest_ip):
+        """
+        Serializes the UDPHeader object into bytes, calculating the checksum.
+        Requires IP addresses for the Pseudo-Header.
+        """
+        # Pack the header with a zero checksum initially
+        # ! = Network (Big Endian)
+        header_without_checksum = struct.pack('!HHHH',
+            self.src_port,
+            self.dest_port,
+            self.length,
+            0 # Checksum set to 0 for calculation
+        )
+        
+        # Combine Header + Payload for checksumming
+        udp_packet = header_without_checksum + self.payload
+        
+        # Calculate UDP Checksum (Pseudo-Header + UDP Header + Payload)
+        self.checksum = calculate_udp_checksum(src_ip, dest_ip, udp_packet)
+        
+        # Pack the header again with the real checksum
+        header_with_checksum = struct.pack('!HHHH',
+            self.src_port,
+            self.dest_port,
+            self.length,
+            self.checksum
+        )
+        
+        return header_with_checksum + self.payload
 
     def __repr__(self):
         return (f"UDP(Src={self.src_port}, Dst={self.dest_port}, "
