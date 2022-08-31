@@ -1,6 +1,6 @@
 import struct
 import socket
-from utils import calculate_checksum
+from utils import calculate_checksum, calculate_udp_checksum
 
 class IPHeader:
     def __init__(self, version, ihl, tos, total_length, identification, flags_offset, ttl, protocol, checksum, src_ip, dest_ip):
