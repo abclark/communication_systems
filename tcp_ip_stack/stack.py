@@ -2,7 +2,9 @@ import sys
 import socket
 import struct
 from fcntl import ioctl
-from packet_headers import IPHeader, ICMPMessage, UDPHeader
+from packet_headers import IPHeader
+from icmp_handler import handle_icmp_packet
+from udp_handler import handle_udp_packet
 
 PF_SYSTEM = 32
 SYSPROTO_CONTROL = 2
@@ -117,101 +119,15 @@ class TCP_IP_Stack:
 
             if ip_header.protocol == 1:
                 icmp_bytes = packet_bytes[ip_header_length:]
-                self._handle_icmp(ip_header, icmp_bytes)
+                handle_icmp_packet(self.tun, ip_header, icmp_bytes)
             elif ip_header.protocol == 17:
                 udp_bytes = packet_bytes[ip_header_length:]
-                self._handle_udp(ip_header, udp_bytes)
+                handle_udp_packet(self.tun, ip_header, udp_bytes)
             
             print(f"Raw Packet Length: {len(packet_bytes)} bytes\n")
         except ValueError as e:
             print(f"Error parsing IP header: {e}", file=sys.stderr)
             print(f"Raw bytes: {packet_bytes.hex()}\n")
-
-    def _handle_icmp(self, ip_header, icmp_bytes):
-        try:
-            icmp_msg = ICMPMessage.from_bytes(icmp_bytes)
-            print("--- PARSED ICMP MESSAGE ---")
-            print(icmp_msg)
-
-            if icmp_msg.type == 8:
-                print("   >>> Sending Echo Reply...")
-                
-                reply_icmp = ICMPMessage(
-                    type=0, 
-                    code=0, 
-                    checksum=0,
-                    identifier=icmp_msg.identifier, 
-                    sequence_number=icmp_msg.sequence_number, 
-                    payload=icmp_msg.payload
-                )
-                reply_icmp_bytes = reply_icmp.to_bytes()
-
-                reply_ip = IPHeader(
-                    version=4,
-                    ihl=5,
-                    tos=0,
-                    total_length=20 + len(reply_icmp_bytes),
-                    identification=0,
-                    flags_offset=0,
-                    ttl=64,
-                    protocol=1,
-                    checksum=0,
-                    src_ip=ip_header.dest_ip,
-                    dest_ip=ip_header.src_ip
-                )
-                reply_ip_bytes = reply_ip.to_bytes()
-
-                self.tun.write(reply_ip_bytes + reply_icmp_bytes)
-        except ValueError as e:
-            print(f"Error parsing ICMP message: {e}", file=sys.stderr)
-
-    def _handle_udp(self, ip_header, udp_bytes):
-        try:
-            udp_header = UDPHeader.from_bytes(udp_bytes)
-            print("--- PARSED UDP HEADER ---")
-            print(udp_header)
-            
-            payload_str = udp_header.payload.decode('utf-8', errors='replace')
-            print(f"   >>> Data: {payload_str}")
-
-            print("   >>> Sending UDP Echo Reply...")
-
-            clean_payload = payload_str.strip()
-            reversed_payload = clean_payload[::-1] + "\n"
-            reply_payload = reversed_payload.encode('utf-8')
-
-            reply_udp = UDPHeader(
-                src_port=udp_header.dest_port,
-                dest_port=udp_header.src_port,
-                length=8 + len(reply_payload),
-                checksum=0,
-                payload=reply_payload
-            )
-            
-            reply_udp_bytes = reply_udp.to_bytes(
-                src_ip=ip_header.dest_ip, 
-                dest_ip=ip_header.src_ip
-            )
-
-            reply_ip = IPHeader(
-                version=4,
-                ihl=5,
-                tos=0,
-                total_length=20 + len(reply_udp_bytes),
-                identification=0,
-                flags_offset=0,
-                ttl=64,
-                protocol=17,
-                checksum=0,
-                src_ip=ip_header.dest_ip,
-                dest_ip=ip_header.src_ip
-            )
-            reply_ip_bytes = reply_ip.to_bytes()
-
-            self.tun.write(reply_ip_bytes + reply_udp_bytes)
-
-        except ValueError as e:
-            print(f"Error parsing UDP message: {e}", file=sys.stderr)
 
     def close(self):
         self.tun.close()
