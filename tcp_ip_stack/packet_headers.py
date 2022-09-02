@@ -193,3 +193,28 @@ class UDPHeader:
     def __repr__(self):
         return (f"UDP(Src={self.src_port}, Dst={self.dest_port}, "
                 f"Len={self.length}, Checksum={hex(self.checksum)})")
+
+class TCPHeader:
+    def __init__(self, src_port, dest_port, seq_num, ack_num, flags, window, checksum, urgent_ptr, payload):
+        self.src_port = src_port
+        self.dest_port = dest_port
+        self.seq_num = seq_num
+        self.ack_num = ack_num
+        self.flags = flags # Dictionary or Int? Let's use Int for now, helper methods later
+        self.window = window
+        self.checksum = checksum
+        self.urgent_ptr = urgent_ptr
+        self.payload = payload
+
+    @classmethod
+    def from_bytes(cls, tcp_bytes):
+        print("TCPHeader: from_bytes called.")
+        pass
+
+    def to_bytes(self, src_ip, dest_ip):
+        print("TCPHeader: to_bytes called.")
+        pass
+
+    def __repr__(self):
+        print("TCPHeader: __repr__ called.")
+        pass
