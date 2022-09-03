@@ -208,8 +208,26 @@ class TCPHeader:
 
     @classmethod
     def from_bytes(cls, tcp_bytes):
-        print("TCPHeader: from_bytes called.")
-        pass
+        if len(tcp_bytes) < 20:
+            raise ValueError("TCP packet is too short to contain a header (min 20 bytes).")
+
+        header_tuple = struct.unpack('!HHIIHHHH', tcp_bytes[:20])
+        
+        src_port = header_tuple[0]
+        dest_port = header_tuple[1]
+        seq_num = header_tuple[2]
+        ack_num = header_tuple[3]
+        offset_reserved_flags = header_tuple[4]
+        window = header_tuple[5]
+        checksum = header_tuple[6]
+        urgent_ptr = header_tuple[7]
+        
+        data_offset = (offset_reserved_flags >> 12) * 4
+        flags = offset_reserved_flags & 0x1FF
+        
+        payload = tcp_bytes[data_offset:]
+        
+        return cls(src_port, dest_port, seq_num, ack_num, flags, window, checksum, urgent_ptr, payload)
 
     def to_bytes(self, src_ip, dest_ip):
         print("TCPHeader: to_bytes called.")
