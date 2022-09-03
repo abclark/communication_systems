@@ -234,5 +234,23 @@ class TCPHeader:
         pass
 
     def __repr__(self):
-        print("TCPHeader: __repr__ called.")
-        pass
+        flag_names = {
+            0x01: "FIN",
+            0x02: "SYN",
+            0x04: "RST",
+            0x08: "PSH",
+            0x10: "ACK",
+            0x20: "URG",
+            0x40: "ECE",
+            0x80: "CWR",
+            0x100: "NS"
+        }
+        active_flags = []
+        for mask, name in flag_names.items():
+            if self.flags & mask:
+                active_flags.append(name)
+        flags_str = "|".join(active_flags) if active_flags else "None"
+        
+        return (f"TCP(Src={self.src_port}, Dst={self.dest_port}, "
+                f"Seq={self.seq_num}, Ack={self.ack_num}, "
+                f"Flags=[{flags_str}], Win={self.window})")
