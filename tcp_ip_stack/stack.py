@@ -5,6 +5,7 @@ from fcntl import ioctl
 from packet_headers import IPHeader
 from icmp_handler import handle_icmp_packet
 from udp_handler import handle_udp_packet
+from tcp_handler import handle_tcp_packet
 
 PF_SYSTEM = 32
 SYSPROTO_CONTROL = 2
@@ -123,6 +124,9 @@ class TCP_IP_Stack:
             elif ip_header.protocol == 17:
                 udp_bytes = packet_bytes[ip_header_length:]
                 handle_udp_packet(self.tun, ip_header, udp_bytes)
+            elif ip_header.protocol == 6:
+                tcp_bytes = packet_bytes[ip_header_length:]
+                handle_tcp_packet(self.tun, ip_header, tcp_bytes)
             
             print(f"Raw Packet Length: {len(packet_bytes)} bytes\n")
         except ValueError as e:
