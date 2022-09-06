@@ -161,26 +161,17 @@ class UDPHeader:
         return cls(src_port, dest_port, length, checksum, payload)
 
     def to_bytes(self, src_ip, dest_ip):
-        """
-        Serializes the UDPHeader object into bytes, calculating the checksum.
-        Requires IP addresses for the Pseudo-Header.
-        """
-        # Pack the header with a zero checksum initially
-        # ! = Network (Big Endian)
         header_without_checksum = struct.pack('!HHHH',
             self.src_port,
             self.dest_port,
             self.length,
-            0 # Checksum set to 0 for calculation
+            0
         )
         
-        # Combine Header + Payload for checksumming
         udp_packet = header_without_checksum + self.payload
         
-        # Calculate UDP Checksum (Pseudo-Header + UDP Header + Payload)
         self.checksum = calculate_udp_checksum(src_ip, dest_ip, udp_packet)
         
-        # Pack the header again with the real checksum
         header_with_checksum = struct.pack('!HHHH',
             self.src_port,
             self.dest_port,
@@ -200,7 +191,7 @@ class TCPHeader:
         self.dest_port = dest_port
         self.seq_num = seq_num
         self.ack_num = ack_num
-        self.flags = flags # Dictionary or Int? Let's use Int for now, helper methods later
+        self.flags = flags
         self.window = window
         self.checksum = checksum
         self.urgent_ptr = urgent_ptr
@@ -230,8 +221,52 @@ class TCPHeader:
         return cls(src_port, dest_port, seq_num, ack_num, flags, window, checksum, urgent_ptr, payload)
 
     def to_bytes(self, src_ip, dest_ip):
-        print("TCPHeader: to_bytes called.")
-        pass
+        data_offset_words = 5
+        offset_reserved_flags = (data_offset_words << 12) | self.flags
+        
+        src_ip_bytes = socket.inet_aton(src_ip)
+        dest_ip_bytes = socket.inet_aton(dest_ip)
+        
+        header_without_checksum = struct.pack('!HHIIHHHH',
+            self.src_port,
+            self.dest_port,
+            self.seq_num,
+            self.ack_num,
+            offset_reserved_flags,
+            self.window,
+            0,
+            self.urgent_ptr
+        )
+        
+        tcp_length = len(header_without_checksum) + len(self.payload)
+        
+        pseudo_header = struct.pack('!4s4sBBH',
+            src_ip_bytes,
+            dest_ip_bytes,
+            0,
+            6,
+            tcp_length
+        )
+        
+        full_data_for_checksum = pseudo_header + header_without_checksum + self.payload
+        
+        if len(full_data_for_checksum) % 2 == 1:
+            full_data_for_checksum += b'\x00'
+            
+        self.checksum = calculate_checksum(full_data_for_checksum)
+        
+        header_with_checksum = struct.pack('!HHIIHHHH',
+            self.src_port,
+            self.dest_port,
+            self.seq_num,
+            self.ack_num,
+            offset_reserved_flags,
+            self.window,
+            self.checksum,
+            self.urgent_ptr
+        )
+        
+        return header_with_checksum + self.payload
 
     def __repr__(self):
         flag_names = {
