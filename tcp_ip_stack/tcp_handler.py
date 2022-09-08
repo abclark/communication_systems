@@ -11,7 +11,8 @@ def handle_tcp_packet(tun, ip_header, tcp_bytes):
         print("--- PARSED TCP HEADER ---")
         print(tcp_header)
         
-        if tcp_header.payload:
+        payload_len = len(tcp_header.payload)
+        if payload_len > 0:
             print(f"   >>> Data: {tcp_header.payload.decode('utf-8', errors='replace')}")
 
         conn_key = (ip_header.src_ip, tcp_header.src_port, ip_header.dest_ip, tcp_header.dest_port)
@@ -28,35 +29,53 @@ def handle_tcp_packet(tun, ip_header, tcp_bytes):
                 'my_ack_num': their_ack_num
             }
 
-            reply_tcp = TCPHeader(
-                src_port=tcp_header.dest_port,
-                dest_port=tcp_header.src_port,
-                seq_num=my_isn,
-                ack_num=their_ack_num,
-                flags=0x02 | 0x10,
-                window=65535,
-                checksum=0,
-                urgent_ptr=0,
-                payload=b''
-            )
-            reply_tcp_bytes = reply_tcp.to_bytes(ip_header.dest_ip, ip_header.src_ip) 
+            send_tcp_packet(tun, ip_header, tcp_header, my_isn, their_ack_num, 0x02 | 0x10)
 
-            reply_ip = IPHeader(
-                version=4,
-                ihl=5,
-                tos=0,
-                total_length=20 + len(reply_tcp_bytes),
-                identification=0,
-                flags_offset=0,
-                ttl=64,
-                protocol=6,
-                checksum=0,
-                src_ip=ip_header.dest_ip,
-                dest_ip=ip_header.src_ip
-            )
-            reply_ip_bytes = reply_ip.to_bytes()
+        elif conn_key in tcp_connections:
+            conn = tcp_connections[conn_key]
 
-            tun.write(reply_ip_bytes + reply_tcp_bytes)
+            if (tcp_header.flags & 0x10) and conn['state'] == 'SYN_RECEIVED':
+                print("   >>> Received ACK. Connection ESTABLISHED.")
+                conn['state'] = 'ESTABLISHED'
+                conn['my_seq_num'] += 1
+
+            if payload_len > 0:
+                print(f"   >>> Received {payload_len} bytes. Sending ACK...")
+                
+                conn['my_ack_num'] = tcp_header.seq_num + payload_len
+                
+                send_tcp_packet(tun, ip_header, tcp_header, conn['my_seq_num'], conn['my_ack_num'], 0x10)
 
     except ValueError as e:
         print(f"Error parsing TCP message: {e}", file=sys.stderr)
+
+def send_tcp_packet(tun, ip_header, incoming_tcp, seq, ack, flags, payload=b''):
+    reply_tcp = TCPHeader(
+        src_port=incoming_tcp.dest_port,
+        dest_port=incoming_tcp.src_port,
+        seq_num=seq,
+        ack_num=ack,
+        flags=flags,
+        window=65535,
+        checksum=0,
+        urgent_ptr=0,
+        payload=payload
+    )
+    reply_tcp_bytes = reply_tcp.to_bytes(ip_header.dest_ip, ip_header.src_ip) 
+
+    reply_ip = IPHeader(
+        version=4,
+        ihl=5,
+        tos=0,
+        total_length=20 + len(reply_tcp_bytes),
+        identification=0,
+        flags_offset=0,
+        ttl=64,
+        protocol=6,
+        checksum=0,
+        src_ip=ip_header.dest_ip,
+        dest_ip=ip_header.src_ip
+    )
+    reply_ip_bytes = reply_ip.to_bytes()
+
+    tun.write(reply_ip_bytes + reply_tcp_bytes)
