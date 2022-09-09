@@ -44,7 +44,16 @@ def handle_tcp_packet(tun, ip_header, tcp_bytes):
                 
                 conn['my_ack_num'] = tcp_header.seq_num + payload_len
                 
-                send_tcp_packet(tun, ip_header, tcp_header, conn['my_seq_num'], conn['my_ack_num'], 0x10)
+                payload_str = tcp_header.payload.decode('utf-8', errors='replace')
+                clean_payload = payload_str.strip()
+                reversed_payload = clean_payload[::-1] + "\n"
+                reply_payload = reversed_payload.encode('utf-8')
+                
+                print(f"   >>> Sending Data Reply: {reversed_payload.strip()}")
+
+                send_tcp_packet(tun, ip_header, tcp_header, conn['my_seq_num'], conn['my_ack_num'], 0x18, reply_payload)
+                
+                conn['my_seq_num'] += len(reply_payload)
 
     except ValueError as e:
         print(f"Error parsing TCP message: {e}", file=sys.stderr)
