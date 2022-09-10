@@ -1,6 +1,7 @@
 import struct
 import socket
 from utils import calculate_checksum, calculate_udp_checksum
+import protocols
 
 class IPHeader:
     def __init__(self, version, ihl, tos, total_length, identification, flags_offset, ttl, protocol, checksum, src_ip, dest_ip):
@@ -244,7 +245,7 @@ class TCPHeader:
             src_ip_bytes,
             dest_ip_bytes,
             0,
-            6,
+            protocols.PROTO_TCP,
             tcp_length
         )
         
@@ -270,15 +271,15 @@ class TCPHeader:
 
     def __repr__(self):
         flag_names = {
-            0x01: "FIN",
-            0x02: "SYN",
-            0x04: "RST",
-            0x08: "PSH",
-            0x10: "ACK",
-            0x20: "URG",
-            0x40: "ECE",
-            0x80: "CWR",
-            0x100: "NS"
+            protocols.TCP_FLAG_FIN: "FIN",
+            protocols.TCP_FLAG_SYN: "SYN",
+            protocols.TCP_FLAG_RST: "RST",
+            protocols.TCP_FLAG_PSH: "PSH",
+            protocols.TCP_FLAG_ACK: "ACK",
+            protocols.TCP_FLAG_URG: "URG",
+            protocols.TCP_FLAG_ECE: "ECE",
+            protocols.TCP_FLAG_CWR: "CWR",
+            protocols.TCP_FLAG_NS: "NS"
         }
         active_flags = []
         for mask, name in flag_names.items():

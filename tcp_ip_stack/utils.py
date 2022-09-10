@@ -1,5 +1,6 @@
 import struct
 import socket
+import protocols
 
 def calculate_checksum(data):
     if len(data) % 2 == 1:
@@ -21,7 +22,7 @@ def calculate_udp_checksum(src_ip, dest_ip, udp_packet):
     src_ip_bytes = socket.inet_aton(src_ip)
     dest_ip_bytes = socket.inet_aton(dest_ip)
     reserved = 0
-    protocol = 17
+    protocol = protocols.PROTO_UDP
     udp_length = len(udp_packet)
     
     pseudo_header = struct.pack('!4s4sBBH',

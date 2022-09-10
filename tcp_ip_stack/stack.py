@@ -6,6 +6,7 @@ from packet_headers import IPHeader
 from icmp_handler import handle_icmp_packet
 from udp_handler import handle_udp_packet
 from tcp_handler import handle_tcp_packet
+import protocols
 
 PF_SYSTEM = 32
 SYSPROTO_CONTROL = 2
@@ -118,13 +119,13 @@ class TCP_IP_Stack:
             
             ip_header_length = ip_header.ihl * 4
 
-            if ip_header.protocol == 1:
+            if ip_header.protocol == protocols.PROTO_ICMP:
                 icmp_bytes = packet_bytes[ip_header_length:]
                 handle_icmp_packet(self.tun, ip_header, icmp_bytes)
-            elif ip_header.protocol == 17:
+            elif ip_header.protocol == protocols.PROTO_UDP:
                 udp_bytes = packet_bytes[ip_header_length:]
                 handle_udp_packet(self.tun, ip_header, udp_bytes)
-            elif ip_header.protocol == 6:
+            elif ip_header.protocol == protocols.PROTO_TCP:
                 tcp_bytes = packet_bytes[ip_header_length:]
                 handle_tcp_packet(self.tun, ip_header, tcp_bytes)
             

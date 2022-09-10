@@ -1,5 +1,6 @@
 import sys
 from packet_headers import IPHeader, UDPHeader
+import protocols
 
 def handle_udp_packet(tun, ip_header, udp_bytes):
     try:
@@ -37,7 +38,7 @@ def handle_udp_packet(tun, ip_header, udp_bytes):
             identification=0,
             flags_offset=0,
             ttl=64,
-            protocol=17,
+            protocol=protocols.PROTO_UDP,
             checksum=0,
             src_ip=ip_header.dest_ip,
             dest_ip=ip_header.src_ip

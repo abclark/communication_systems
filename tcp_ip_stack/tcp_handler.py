@@ -2,6 +2,7 @@ import sys
 import random
 import socket
 from packet_headers import IPHeader, TCPHeader
+import protocols
 
 tcp_connections = {}
 
@@ -17,7 +18,7 @@ def handle_tcp_packet(tun, ip_header, tcp_bytes):
 
         conn_key = (ip_header.src_ip, tcp_header.src_port, ip_header.dest_ip, tcp_header.dest_port)
         
-        if (tcp_header.flags & 0x02) and not (tcp_header.flags & 0x10): 
+        if (tcp_header.flags & protocols.TCP_FLAG_SYN) and not (tcp_header.flags & protocols.TCP_FLAG_ACK): 
             print("   >>> Received SYN. Sending SYN-ACK...")
             
             my_isn = random.randint(0, 2**32 - 1)
@@ -29,12 +30,12 @@ def handle_tcp_packet(tun, ip_header, tcp_bytes):
                 'my_ack_num': their_ack_num
             }
 
-            send_tcp_packet(tun, ip_header, tcp_header, my_isn, their_ack_num, 0x02 | 0x10)
+            send_tcp_packet(tun, ip_header, tcp_header, my_isn, their_ack_num, protocols.TCP_FLAG_SYN | protocols.TCP_FLAG_ACK)
 
         elif conn_key in tcp_connections:
             conn = tcp_connections[conn_key]
 
-            if (tcp_header.flags & 0x10) and conn['state'] == 'SYN_RECEIVED':
+            if (tcp_header.flags & protocols.TCP_FLAG_ACK) and conn['state'] == 'SYN_RECEIVED':
                 print("   >>> Received ACK. Connection ESTABLISHED.")
                 conn['state'] = 'ESTABLISHED'
                 conn['my_seq_num'] += 1
@@ -51,7 +52,7 @@ def handle_tcp_packet(tun, ip_header, tcp_bytes):
                 
                 print(f"   >>> Sending Data Reply: {reversed_payload.strip()}")
 
-                send_tcp_packet(tun, ip_header, tcp_header, conn['my_seq_num'], conn['my_ack_num'], 0x18, reply_payload)
+                send_tcp_packet(tun, ip_header, tcp_header, conn['my_seq_num'], conn['my_ack_num'], protocols.TCP_FLAG_PSH | protocols.TCP_FLAG_ACK, reply_payload)
                 
                 conn['my_seq_num'] += len(reply_payload)
 
@@ -80,7 +81,7 @@ def send_tcp_packet(tun, ip_header, incoming_tcp, seq, ack, flags, payload=b''):
         identification=0,
         flags_offset=0,
         ttl=64,
-        protocol=6,
+        protocol=protocols.PROTO_TCP,
         checksum=0,
         src_ip=ip_header.dest_ip,
         dest_ip=ip_header.src_ip
