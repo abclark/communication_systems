@@ -4,6 +4,17 @@ import socket
 from packet_headers import IPHeader, TCPHeader
 import protocols
 
+class TCPConnection:
+    def __init__(self, key, isn, ack):
+        self.key = key
+        self.state = 'SYN_RECEIVED'
+        self.my_seq_num = isn
+        self.my_ack_num = ack
+
+    def establish(self):
+        self.state = 'ESTABLISHED'
+        self.my_seq_num += 1
+
 tcp_connections = {}
 
 def handle_tcp_packet(tun, ip_header, tcp_bytes):
@@ -24,26 +35,23 @@ def handle_tcp_packet(tun, ip_header, tcp_bytes):
             my_isn = random.randint(0, 2**32 - 1)
             their_ack_num = tcp_header.seq_num + 1
 
-            tcp_connections[conn_key] = {
-                'state': 'SYN_RECEIVED',
-                'my_seq_num': my_isn,
-                'my_ack_num': their_ack_num
-            }
+            # Create new connection object
+            conn = TCPConnection(conn_key, my_isn, their_ack_num)
+            tcp_connections[conn_key] = conn
 
-            send_tcp_packet(tun, ip_header, tcp_header, my_isn, their_ack_num, protocols.TCP_FLAG_SYN | protocols.TCP_FLAG_ACK)
+            send_tcp_packet(tun, ip_header, tcp_header, conn.my_seq_num, conn.my_ack_num, protocols.TCP_FLAG_SYN | protocols.TCP_FLAG_ACK)
 
         elif conn_key in tcp_connections:
             conn = tcp_connections[conn_key]
 
-            if (tcp_header.flags & protocols.TCP_FLAG_ACK) and conn['state'] == 'SYN_RECEIVED':
+            if (tcp_header.flags & protocols.TCP_FLAG_ACK) and conn.state == 'SYN_RECEIVED':
                 print("   >>> Received ACK. Connection ESTABLISHED.")
-                conn['state'] = 'ESTABLISHED'
-                conn['my_seq_num'] += 1
+                conn.establish()
 
             if payload_len > 0:
                 print(f"   >>> Received {payload_len} bytes. Sending ACK...")
                 
-                conn['my_ack_num'] = tcp_header.seq_num + payload_len
+                conn.my_ack_num = tcp_header.seq_num + payload_len
                 
                 payload_str = tcp_header.payload.decode('utf-8', errors='replace')
                 clean_payload = payload_str.strip()
@@ -52,9 +60,9 @@ def handle_tcp_packet(tun, ip_header, tcp_bytes):
                 
                 print(f"   >>> Sending Data Reply: {reversed_payload.strip()}")
 
-                send_tcp_packet(tun, ip_header, tcp_header, conn['my_seq_num'], conn['my_ack_num'], protocols.TCP_FLAG_PSH | protocols.TCP_FLAG_ACK, reply_payload)
+                send_tcp_packet(tun, ip_header, tcp_header, conn.my_seq_num, conn.my_ack_num, protocols.TCP_FLAG_PSH | protocols.TCP_FLAG_ACK, reply_payload)
                 
-                conn['my_seq_num'] += len(reply_payload)
+                conn.my_seq_num += len(reply_payload)
 
     except ValueError as e:
         print(f"Error parsing TCP message: {e}", file=sys.stderr)
