@@ -64,6 +64,27 @@ def handle_tcp_packet(tun, ip_header, tcp_bytes):
                 
                 conn.my_seq_num += len(reply_payload)
 
+            # --- Teardown: FIN ---
+            if (tcp_header.flags & protocols.TCP_FLAG_FIN):
+                print("   >>> Received FIN. Sending ACK + FIN...")
+                
+                # FIN consumes 1 sequence number
+                conn.my_ack_num = tcp_header.seq_num + payload_len + 1
+                
+                # Send ACK to confirm their FIN
+                # AND send our own FIN to close our side
+                # Flags: FIN | ACK
+                send_tcp_packet(tun, ip_header, tcp_header, conn.my_seq_num, conn.my_ack_num, protocols.TCP_FLAG_FIN | protocols.TCP_FLAG_ACK)
+                
+                # Our FIN consumes 1 sequence number
+                conn.my_seq_num += 1
+                conn.state = 'LAST_ACK'
+
+            # --- Teardown: Final ACK ---
+            elif (tcp_header.flags & protocols.TCP_FLAG_ACK) and conn.state == 'LAST_ACK':
+                print("   >>> Received Final ACK. Connection CLOSED.")
+                del tcp_connections[conn_key]
+
     except ValueError as e:
         print(f"Error parsing TCP message: {e}", file=sys.stderr)
 
