@@ -98,3 +98,84 @@ def encode_bytes(data):
     """
     waveforms = [encode_byte(b) for b in data]
     return np.concatenate(waveforms)
+
+
+# --- Decoding (Reception) ---
+
+def decode_bit(samples):
+    """
+    Decode a single bit from audio samples using FFT.
+
+    Args:
+        samples: numpy array of SAMPLES_PER_BIT samples (441)
+
+    Returns:
+        Integer 0 or 1
+    """
+    # Compute FFT - get frequency spectrum
+    spectrum = np.abs(np.fft.rfft(samples))
+
+    # Calculate which bin corresponds to each frequency
+    # bin = frequency / (sample_rate / num_samples)
+    freq_resolution = SAMPLE_RATE / len(samples)  # Hz per bin
+
+    bin_0 = int(FREQ_0 / freq_resolution)  # 1000 / 100 = 10
+    bin_1 = int(FREQ_1 / freq_resolution)  # 2000 / 100 = 20
+
+    # Compare amplitudes at the two frequencies
+    if spectrum[bin_1] > spectrum[bin_0]:
+        return 1
+    else:
+        return 0
+
+
+def decode_byte(samples):
+    """
+    Decode a byte from audio samples.
+
+    Args:
+        samples: numpy array of 8 * SAMPLES_PER_BIT samples (3528)
+
+    Returns:
+        Integer 0-255
+    """
+    byte_value = 0
+
+    for i in range(8):
+        # Extract samples for this bit
+        start = i * SAMPLES_PER_BIT
+        end = start + SAMPLES_PER_BIT
+        bit_samples = samples[start:end]
+
+        # Decode the bit
+        bit = decode_bit(bit_samples)
+
+        # Shift into position (MSB first)
+        byte_value = (byte_value << 1) | bit
+
+    return byte_value
+
+
+def decode_bytes(samples, num_bytes):
+    """
+    Decode multiple bytes from audio samples.
+
+    Args:
+        samples: numpy array of audio samples
+        num_bytes: number of bytes to decode
+
+    Returns:
+        bytes object
+    """
+    result = []
+    samples_per_byte = SAMPLES_PER_BIT * 8
+
+    for i in range(num_bytes):
+        start = i * samples_per_byte
+        end = start + samples_per_byte
+        byte_samples = samples[start:end]
+
+        byte_value = decode_byte(byte_samples)
+        result.append(byte_value)
+
+    return bytes(result)

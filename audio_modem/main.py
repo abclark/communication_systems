@@ -14,32 +14,76 @@ def play(samples, sample_rate=phy.SAMPLE_RATE):
     sd.wait()  # Block until playback is finished
 
 
+def test_roundtrip():
+    """Test encode → decode without audio (verify the math)."""
+    print("=== Testing Encode → Decode Roundtrip ===\n")
+
+    # Test 1: Single bit
+    print("1. Single bit test:")
+    for bit in [0, 1]:
+        wave = phy.encode_bit(bit)
+        decoded = phy.decode_bit(wave)
+        status = "✓" if decoded == bit else "✗"
+        print(f"   {bit} → encode → decode → {decoded}  {status}")
+
+    # Test 2: Single byte
+    print("\n2. Single byte test:")
+    for byte_val in [0x00, 0xFF, 0xAA, 0x55, 0x48]:
+        wave = phy.encode_byte(byte_val)
+        decoded = phy.decode_byte(wave)
+        status = "✓" if decoded == byte_val else "✗"
+        print(f"   0x{byte_val:02X} → encode → decode → 0x{decoded:02X}  {status}")
+
+    # Test 3: String
+    print("\n3. String test:")
+    test_string = b"Hi"
+    wave = phy.encode_bytes(test_string)
+    decoded = phy.decode_bytes(wave, len(test_string))
+    status = "✓" if decoded == test_string else "✗"
+    print(f"   {test_string} → encode → decode → {decoded}  {status}")
+
+    # Test 4: Merry Christmas
+    print("\n4. Merry Christmas test:")
+    test_string = b"Merry Christmas"
+    wave = phy.encode_bytes(test_string)
+    decoded = phy.decode_bytes(wave, len(test_string))
+    status = "✓" if decoded == test_string else "✗"
+    print(f"   {test_string}")
+    print(f"   → {decoded}  {status}")
+
+    print("\n=== Roundtrip Test Complete ===\n")
+
+
+def test_audio():
+    """Play encoded audio through speakers."""
+    print("=== Audio Playback Test ===\n")
+
+    # Play the two tones
+    print("1. Playing FREQ_0 (1000 Hz) - represents '0'")
+    play(phy.generate_tone(phy.FREQ_0, duration=0.3))
+
+    print("2. Playing FREQ_1 (2000 Hz) - represents '1'")
+    play(phy.generate_tone(phy.FREQ_1, duration=0.3))
+
+    # Play a message
+    print("\n3. Playing 'Hi' as audio")
+    wave = phy.encode_bytes(b"Hi")
+    play(wave)
+
+    # Play Merry Christmas
+    print("\n4. Playing 'Merry Christmas' as audio (1.2 seconds)")
+    wave = phy.encode_bytes(b"Merry Christmas")
+    play(wave)
+
+    print("\n=== Audio Test Complete ===")
+
+
 def main():
-    print("=== Audio Modem - Phase 1: Tone Generation ===\n")
+    # First verify the math works
+    test_roundtrip()
 
-    # Test 1: Play our two frequencies
-    print("1. Playing FREQ_0 (1000 Hz) - this represents '0'")
-    wave_0 = phy.generate_tone(phy.FREQ_0, duration=0.5)
-    play(wave_0)
-
-    print("2. Playing FREQ_1 (2000 Hz) - this represents '1'")
-    wave_1 = phy.generate_tone(phy.FREQ_1, duration=0.5)
-    play(wave_1)
-
-    # Test 2: Encode a single byte with alternating bits
-    print("\n3. Playing byte 0xAA (binary: 10101010)")
-    print("   You should hear alternating high-low tones")
-    wave_aa = phy.encode_byte(0xAA)
-    play(wave_aa)
-
-    # Test 3: Encode a string
-    print("\n4. Playing 'Hi' as audio")
-    print("   H = 0x48 = 01001000")
-    print("   i = 0x69 = 01101001")
-    wave_hi = phy.encode_bytes(b"Hi")
-    play(wave_hi)
-
-    print("\n=== Done! ===")
+    # Then play some audio
+    test_audio()
 
 
 if __name__ == "__main__":
