@@ -5,6 +5,7 @@ Run this to hear your bits become sound!
 """
 
 import sounddevice as sd
+import numpy as np
 import phy
 
 
@@ -12,6 +13,15 @@ def play(samples, sample_rate=phy.SAMPLE_RATE):
     """Play audio samples through the speaker."""
     sd.play(samples, sample_rate)
     sd.wait()  # Block until playback is finished
+
+
+def record(duration, sample_rate=phy.SAMPLE_RATE):
+    """Record audio from the microphone."""
+    num_samples = int(sample_rate * duration)
+    print(f"   Recording {duration} seconds...")
+    recording = sd.rec(num_samples, samplerate=sample_rate, channels=1, dtype='float32')
+    sd.wait()  # Block until recording is finished
+    return recording.flatten()  # Return as 1D array
 
 
 def test_roundtrip():
@@ -54,6 +64,51 @@ def test_roundtrip():
     print("\n=== Roundtrip Test Complete ===\n")
 
 
+def test_loopback():
+    """Test real audio: play through speaker, record through mic, decode."""
+    print("=== Real Audio Loopback Test ===\n")
+    print("This will play audio and record it through your microphone.")
+    print("Make sure your speaker volume is up and mic is enabled.\n")
+
+    test_message = b"Hi"
+
+    # Encode the message
+    wave = phy.encode_bytes(test_message)
+    duration = len(wave) / phy.SAMPLE_RATE
+
+    print(f"1. Sending: {test_message}")
+    print(f"   Duration: {duration:.2f} seconds")
+
+    # Play and record simultaneously
+    print("2. Playing and recording...")
+    recording = sd.playrec(
+        wave,
+        samplerate=phy.SAMPLE_RATE,
+        channels=1,
+        dtype='float32',
+        input_mapping=[1],
+        output_mapping=[1]
+    )
+    sd.wait()
+    recording = recording.flatten()
+
+    # Decode (assumes recording is aligned - we'll add framing later)
+    print("3. Decoding...")
+    decoded = phy.decode_bytes(recording, len(test_message))
+
+    status = "SUCCESS" if decoded == test_message else "FAILED"
+    print(f"\n   Sent:     {test_message}")
+    print(f"   Received: {decoded}")
+    print(f"   Status:   {status}")
+
+    if decoded != test_message:
+        print("\n   Note: Real audio loopback is hard! The signal may be")
+        print("   distorted by speaker/mic quality, room echo, or timing.")
+        print("   We'll add framing (preamble/sync) to make this robust.")
+
+    print("\n=== Loopback Test Complete ===\n")
+
+
 def test_audio():
     """Play encoded audio through speakers."""
     print("=== Audio Playback Test ===\n")
@@ -80,10 +135,13 @@ def test_audio():
 
 def main():
     # First verify the math works
-    test_roundtrip()
+    # test_roundtrip()
+
+    # Test real audio loopback (speaker → mic → decode)
+    test_loopback()
 
     # Then play some audio
-    test_audio()
+    # test_audio()
 
 
 if __name__ == "__main__":
