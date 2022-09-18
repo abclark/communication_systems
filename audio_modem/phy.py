@@ -7,6 +7,10 @@ BAUD_RATE = 100
 BIT_DURATION = 1.0 / BAUD_RATE
 SAMPLES_PER_BIT = int(SAMPLE_RATE * BIT_DURATION)
 
+PREAMBLE = bytes([0xAA, 0xAA])
+SYNC_WORD = bytes([0xDE, 0xAD])
+HEADER = PREAMBLE + SYNC_WORD
+
 
 def generate_tone(frequency, duration, sample_rate=SAMPLE_RATE, amplitude=0.5):
     num_samples = int(sample_rate * duration)
@@ -65,3 +69,34 @@ def decode_bytes(samples, num_bytes):
         byte_value = decode_byte(byte_samples)
         result.append(byte_value)
     return bytes(result)
+
+
+def encode_frame(payload):
+    if len(payload) > 255:
+        raise ValueError("Payload too long (max 255 bytes)")
+    frame = HEADER + bytes([len(payload)]) + payload
+    return encode_bytes(frame)
+
+
+def find_frame_offset(recording):
+    header_signal = encode_bytes(HEADER)
+    correlation = np.correlate(recording, header_signal, mode='valid')
+    offset = np.argmax(np.abs(correlation))
+    return offset
+
+
+def decode_frame(recording):
+    offset = find_frame_offset(recording)
+    samples_per_byte = SAMPLES_PER_BIT * 8
+
+    header_samples = len(HEADER) * samples_per_byte
+    length_offset = offset + header_samples
+
+    length_samples = recording[length_offset:length_offset + samples_per_byte]
+    payload_length = decode_byte(length_samples)
+
+    payload_offset = length_offset + samples_per_byte
+    payload_samples = recording[payload_offset:payload_offset + payload_length * samples_per_byte]
+    payload = decode_bytes(payload_samples, payload_length)
+
+    return payload

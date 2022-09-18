@@ -51,28 +51,22 @@ def test_roundtrip():
     print("\n=== Roundtrip Test Complete ===\n")
 
 
-def find_signal_offset(sent, recorded):
-    correlation = np.correlate(recorded, sent, mode='valid')
-    offset = np.argmax(np.abs(correlation))
-    return offset
-
-
 def test_loopback():
-    print("=== Real Audio Loopback Test ===\n")
+    print("=== Real Audio Loopback Test (with Framing) ===\n")
     print("This will play audio and record it through your microphone.")
     print("Make sure your speaker volume is up and mic is enabled.\n")
 
     test_message = b"Yippee ki yay"
 
-    signal = phy.encode_bytes(test_message)
-    signal_duration = len(signal) / phy.SAMPLE_RATE
+    frame = phy.encode_frame(test_message)
+    frame_duration = len(frame) / phy.SAMPLE_RATE
 
     padding_samples = int(0.5 * phy.SAMPLE_RATE)
     silence = np.zeros(padding_samples, dtype=np.float32)
-    wave_to_play = np.concatenate([silence, signal, silence])
+    wave_to_play = np.concatenate([silence, frame, silence])
 
     print(f"1. Sending: {test_message}")
-    print(f"   Signal duration: {signal_duration:.2f} seconds")
+    print(f"   Frame duration: {frame_duration:.2f} seconds")
 
     print("2. Playing and recording...")
     recording = sd.playrec(
@@ -86,13 +80,8 @@ def test_loopback():
     sd.wait()
     recording = recording.flatten()
 
-    print("3. Finding signal in recording...")
-    offset = find_signal_offset(signal, recording)
-    print(f"   Signal found at offset: {offset} samples ({offset/phy.SAMPLE_RATE:.3f} sec)")
-
-    print("4. Decoding...")
-    signal_in_recording = recording[offset:offset + len(signal)]
-    decoded = phy.decode_bytes(signal_in_recording, len(test_message))
+    print("3. Decoding frame...")
+    decoded = phy.decode_frame(recording)
 
     status = "SUCCESS" if decoded == test_message else "FAILED"
     print(f"\n   Sent:     {test_message}")
