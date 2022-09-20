@@ -100,3 +100,27 @@ def decode_frame(recording):
     payload = decode_bytes(payload_samples, payload_length)
 
     return payload
+
+
+class AudioDevice:
+    def __init__(self):
+        import sounddevice as sd
+        self.sd = sd
+        self.padding_samples = int(0.5 * SAMPLE_RATE)
+
+    def write(self, packet_bytes):
+        frame = encode_frame(packet_bytes)
+        silence = np.zeros(self.padding_samples, dtype=np.float32)
+        wave = np.concatenate([silence, frame, silence])
+        self.sd.play(wave, SAMPLE_RATE)
+        self.sd.wait()
+
+    def read(self, timeout=10):
+        num_samples = int(timeout * SAMPLE_RATE)
+        recording = self.sd.rec(num_samples, samplerate=SAMPLE_RATE, channels=1, dtype='float32')
+        self.sd.wait()
+        recording = recording.flatten()
+        return decode_frame(recording)
+
+    def close(self):
+        pass
