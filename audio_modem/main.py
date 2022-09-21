@@ -115,9 +115,59 @@ def test_audio():
     print("\n=== Audio Test Complete ===")
 
 
+def test_audio_device():
+    print("=== AudioDevice Test (Fake IP Packet) ===\n")
+
+    fake_ip_packet = bytes([
+        0x45, 0x00, 0x00, 0x1c,  # Version, IHL, TOS, Total Length (28 bytes)
+        0x00, 0x01, 0x00, 0x00,  # ID, Flags, Fragment Offset
+        0x40, 0x01, 0x00, 0x00,  # TTL=64, Protocol=ICMP, Checksum (placeholder)
+        0x0a, 0x00, 0x00, 0x01,  # Source IP: 10.0.0.1
+        0x0a, 0x00, 0x00, 0x02,  # Dest IP: 10.0.0.2
+        0x08, 0x00, 0x00, 0x00,  # ICMP Echo Request
+        0x00, 0x01, 0x00, 0x01,  # ICMP ID and Sequence
+    ])
+
+    print(f"1. Fake IP packet ({len(fake_ip_packet)} bytes):")
+    print(f"   {fake_ip_packet.hex()}")
+
+    frame = phy.encode_frame(fake_ip_packet)
+    frame_duration = len(frame) / phy.SAMPLE_RATE
+
+    padding_samples = int(0.5 * phy.SAMPLE_RATE)
+    silence = np.zeros(padding_samples, dtype=np.float32)
+    wave_to_play = np.concatenate([silence, frame, silence])
+
+    print(f"\n2. Transmitting via audio ({frame_duration:.2f} sec)...")
+    recording = sd.playrec(
+        wave_to_play,
+        samplerate=phy.SAMPLE_RATE,
+        channels=1,
+        dtype='float32',
+        input_mapping=[1],
+        output_mapping=[1]
+    )
+    sd.wait()
+    recording = recording.flatten()
+
+    print("3. Decoding...")
+    received = phy.decode_frame(recording)
+
+    status = "SUCCESS" if received == fake_ip_packet else "FAILED"
+    print(f"\n   Sent:     {fake_ip_packet.hex()}")
+    print(f"   Received: {received.hex()}")
+    print(f"   Status:   {status}")
+
+    if received == fake_ip_packet:
+        print("\n   IP packet survived the audio journey!")
+
+    print("\n=== AudioDevice Test Complete ===\n")
+
+
 def main():
     # test_roundtrip()
-    test_loopback()
+    # test_loopback()
+    test_audio_device()
     # test_audio()
 
 
