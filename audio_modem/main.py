@@ -1,6 +1,10 @@
+import sys
+sys.path.insert(0, '../tcp_ip_stack')
+
 import sounddevice as sd
 import numpy as np
 import phy
+from packet_headers import IPHeader, ICMPMessage
 
 
 def play(samples, sample_rate=phy.SAMPLE_RATE):
@@ -160,6 +164,14 @@ def test_audio_device():
 
     if received == fake_ip_packet:
         print("\n   IP packet survived the audio journey!")
+
+        print("\n4. Parsing as IP packet...")
+        ip_header = IPHeader.from_bytes(received)
+        print(f"   {ip_header}")
+
+        icmp_bytes = received[ip_header.ihl * 4:]
+        icmp_msg = ICMPMessage.from_bytes(icmp_bytes)
+        print(f"   {icmp_msg}")
 
     print("\n=== AudioDevice Test Complete ===\n")
 
