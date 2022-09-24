@@ -4,7 +4,8 @@ sys.path.insert(0, '../tcp_ip_stack')
 import sounddevice as sd
 import numpy as np
 import phy
-from packet_headers import IPHeader, ICMPMessage
+from packet_headers import IPHeader, ICMPMessage, TCPHeader
+import protocols
 
 
 def play(samples, sample_rate=phy.SAMPLE_RATE):
@@ -174,6 +175,27 @@ def test_audio_device():
         print(f"   {icmp_msg}")
 
     print("\n=== AudioDevice Test Complete ===\n")
+
+
+def test_tcp_syn():
+    print("=== TCP SYN over Audio ===\n")
+
+    src_ip = '10.0.0.1'
+    dest_ip = '10.0.0.2'
+    src_port = 12345
+    dest_port = 80
+    seq_num = 1000
+
+    print(f"1. Building TCP SYN packet...")
+    print(f"   {src_ip}:{src_port} → {dest_ip}:{dest_port}")
+    print(f"   SEQ={seq_num}, Flags=SYN")
+
+    # TODO: Build TCP header
+    # TODO: Build IP header
+    # TODO: Transmit over audio
+    # TODO: Parse received packet
+
+    print("\n=== TCP SYN Test Complete ===\n")
 
 
 def main():
