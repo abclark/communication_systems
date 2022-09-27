@@ -186,14 +186,45 @@ def test_tcp_syn():
     dest_port = 80
     seq_num = 1000
 
-    print(f"1. Building TCP SYN packet...")
-    print(f"   {src_ip}:{src_port} → {dest_ip}:{dest_port}")
-    print(f"   SEQ={seq_num}, Flags=SYN")
+    print("1. Building TCP SYN packet...")
+    tcp_header = TCPHeader(
+        src_port=src_port,
+        dest_port=dest_port,
+        seq_num=seq_num,
+        ack_num=0,
+        flags=protocols.TCP_FLAG_SYN,
+        window=65535,
+        checksum=0,
+        urgent_ptr=0,
+        payload=b''
+    )
+    tcp_bytes = tcp_header.to_bytes(src_ip, dest_ip)
+    print(f"   TCP header: {len(tcp_bytes)} bytes")
 
-    # TODO: Build TCP header
-    # TODO: Build IP header
-    # TODO: Transmit over audio
-    # TODO: Parse received packet
+    ip_header = IPHeader(
+        version=4,
+        ihl=5,
+        tos=0,
+        total_length=20 + len(tcp_bytes),
+        identification=1,
+        flags_offset=0,
+        ttl=64,
+        protocol=protocols.PROTO_TCP,
+        checksum=0,
+        src_ip=src_ip,
+        dest_ip=dest_ip
+    )
+    ip_bytes = ip_header.to_bytes()
+    print(f"   IP header:  {len(ip_bytes)} bytes")
+
+    packet = ip_bytes + tcp_bytes
+    print(f"   Total:      {len(packet)} bytes")
+
+    print("2. Transmitting via audio...")
+    # TODO: Encode and transmit
+
+    print("3. Decoding received audio...")
+    # TODO: Decode and parse
 
     print("\n=== TCP SYN Test Complete ===\n")
 
