@@ -221,7 +221,24 @@ def test_tcp_syn():
     print(f"   Total:      {len(packet)} bytes")
 
     print("2. Transmitting via audio...")
-    # TODO: Encode and transmit
+    frame = phy.encode_frame(packet)
+    frame_duration = len(frame) / phy.SAMPLE_RATE
+
+    padding_samples = int(0.5 * phy.SAMPLE_RATE)
+    silence = np.zeros(padding_samples, dtype=np.float32)
+    wave_to_play = np.concatenate([silence, frame, silence])
+
+    print(f"   Frame duration: {frame_duration:.2f} sec")
+    recording = sd.playrec(
+        wave_to_play,
+        samplerate=phy.SAMPLE_RATE,
+        channels=1,
+        dtype='float32',
+        input_mapping=[1],
+        output_mapping=[1]
+    )
+    sd.wait()
+    recording = recording.flatten()
 
     print("3. Decoding received audio...")
     # TODO: Decode and parse
