@@ -241,7 +241,21 @@ def test_tcp_syn():
     recording = recording.flatten()
 
     print("3. Decoding received audio...")
-    # TODO: Decode and parse
+    received = phy.decode_frame(recording)
+
+    status = "SUCCESS" if received == packet else "FAILED"
+    print(f"   Sent:     {packet.hex()}")
+    print(f"   Received: {received.hex()}")
+    print(f"   Status:   {status}")
+
+    if received == packet:
+        print("\n4. Parsing received packet...")
+        rx_ip = IPHeader.from_bytes(received)
+        print(f"   {rx_ip}")
+
+        rx_tcp_bytes = received[rx_ip.ihl * 4:]
+        rx_tcp = TCPHeader.from_bytes(rx_tcp_bytes)
+        print(f"   {rx_tcp}")
 
     print("\n=== TCP SYN Test Complete ===\n")
 
@@ -249,7 +263,8 @@ def test_tcp_syn():
 def main():
     # test_roundtrip()
     # test_loopback()
-    test_audio_device()
+    # test_audio_device()
+    test_tcp_syn()
     # test_audio()
 
 
