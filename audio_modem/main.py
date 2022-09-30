@@ -260,6 +260,22 @@ def test_tcp_syn():
     print("\n=== TCP SYN Test Complete ===\n")
 
 
+def listen_for_packet(timeout=10):
+    print(f"=== Listening for {timeout} seconds ===\n")
+
+    num_samples = int(timeout * phy.SAMPLE_RATE)
+    print("Waiting for incoming packet...")
+    recording = sd.rec(num_samples, samplerate=phy.SAMPLE_RATE, channels=1, dtype='float32')
+    sd.wait()
+    recording = recording.flatten()
+
+    print("Decoding...")
+    received = phy.decode_frame(recording)
+    print(f"Received {len(received)} bytes: {received.hex()}")
+
+    print("\n=== Listener Complete ===\n")
+
+
 def main():
     # test_roundtrip()
     # test_loopback()
