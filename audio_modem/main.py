@@ -273,15 +273,55 @@ def listen_for_packet(timeout=10):
     received = phy.decode_frame(recording)
     print(f"Received {len(received)} bytes: {received.hex()}")
 
+    print("Parsing...")
+    ip_header = IPHeader.from_bytes(received)
+    print(f"   {ip_header}")
+
+    if ip_header.protocol == protocols.PROTO_TCP:
+        tcp_bytes = received[ip_header.ihl * 4:]
+        tcp_header = TCPHeader.from_bytes(tcp_bytes)
+        print(f"   {tcp_header}")
+    elif ip_header.protocol == protocols.PROTO_ICMP:
+        icmp_bytes = received[ip_header.ihl * 4:]
+        icmp_msg = ICMPMessage.from_bytes(icmp_bytes)
+        print(f"   {icmp_msg}")
+
     print("\n=== Listener Complete ===\n")
+
+
+def tcp_server():
+    print("=== TCP Server (waiting for SYN) ===\n")
+
+    print("1. Listening for SYN...")
+    num_samples = int(30 * phy.SAMPLE_RATE)
+    recording = sd.rec(num_samples, samplerate=phy.SAMPLE_RATE, channels=1, dtype='float32')
+    sd.wait()
+    recording = recording.flatten()
+
+    received = phy.decode_frame(recording)
+    ip_header = IPHeader.from_bytes(received)
+    tcp_header = TCPHeader.from_bytes(received[ip_header.ihl * 4:])
+    print(f"   {ip_header}")
+    print(f"   {tcp_header}")
+
+    if not (tcp_header.flags & protocols.TCP_FLAG_SYN):
+        print("   Not a SYN packet, aborting.")
+        return
+
+    print("\n2. Building SYN-ACK response...")
+    # TODO: Build and send SYN-ACK
+
+    print("\n=== TCP Server Complete ===\n")
 
 
 def main():
     # test_roundtrip()
     # test_loopback()
     # test_audio_device()
-    test_tcp_syn()
+    # test_tcp_syn()
     # test_audio()
+    # listen_for_packet(timeout=30)
+    test_tcp_syn()
 
 
 if __name__ == "__main__":
