@@ -309,19 +309,70 @@ def tcp_server():
         return
 
     print("\n2. Building SYN-ACK response...")
-    # TODO: Build and send SYN-ACK
+    my_seq = 2000
+    their_seq = tcp_header.seq_num
+
+    reply_tcp = TCPHeader(
+        src_port=tcp_header.dest_port,
+        dest_port=tcp_header.src_port,
+        seq_num=my_seq,
+        ack_num=their_seq + 1,
+        flags=protocols.TCP_FLAG_SYN | protocols.TCP_FLAG_ACK,
+        window=65535,
+        checksum=0,
+        urgent_ptr=0,
+        payload=b''
+    )
+    reply_tcp_bytes = reply_tcp.to_bytes(ip_header.dest_ip, ip_header.src_ip)
+
+    reply_ip = IPHeader(
+        version=4,
+        ihl=5,
+        tos=0,
+        total_length=20 + len(reply_tcp_bytes),
+        identification=1,
+        flags_offset=0,
+        ttl=64,
+        protocol=protocols.PROTO_TCP,
+        checksum=0,
+        src_ip=ip_header.dest_ip,
+        dest_ip=ip_header.src_ip
+    )
+    reply_ip_bytes = reply_ip.to_bytes()
+
+    reply_packet = reply_ip_bytes + reply_tcp_bytes
+    print(f"   SYN-ACK: seq={my_seq}, ack={their_seq + 1}")
+
+    print("\n3. Sending SYN-ACK...")
+    frame = phy.encode_frame(reply_packet)
+    padding = np.zeros(int(0.5 * phy.SAMPLE_RATE), dtype=np.float32)
+    wave = np.concatenate([padding, frame, padding])
+    sd.play(wave, phy.SAMPLE_RATE)
+    sd.wait()
+    print("   Sent!")
 
     print("\n=== TCP Server Complete ===\n")
 
 
 def main():
-    # test_roundtrip()
-    # test_loopback()
-    # test_audio_device()
-    # test_tcp_syn()
-    # test_audio()
-    # listen_for_packet(timeout=30)
-    test_tcp_syn()
+    if len(sys.argv) < 2:
+        print("Usage: python main.py <command>")
+        print("Commands: server, client, syn, listen")
+        return
+
+    command = sys.argv[1]
+
+    if command == 'server':
+        tcp_server()
+    elif command == 'client':
+        tcp_client()
+    elif command == 'syn':
+        test_tcp_syn()
+    elif command == 'listen':
+        timeout = int(sys.argv[2]) if len(sys.argv) > 2 else 10
+        listen_for_packet(timeout)
+    else:
+        print(f"Unknown command: {command}")
 
 
 if __name__ == "__main__":
