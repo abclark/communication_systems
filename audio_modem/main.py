@@ -354,6 +354,62 @@ def tcp_server():
     print("\n=== TCP Server Complete ===\n")
 
 
+def tcp_client():
+    print("=== TCP Client (initiating handshake) ===\n")
+
+    src_ip = '10.0.0.1'
+    dest_ip = '10.0.0.2'
+    src_port = 12345
+    dest_port = 80
+    my_seq = 1000
+
+    print("1. Sending SYN...")
+    syn_tcp = TCPHeader(
+        src_port=src_port,
+        dest_port=dest_port,
+        seq_num=my_seq,
+        ack_num=0,
+        flags=protocols.TCP_FLAG_SYN,
+        window=65535,
+        checksum=0,
+        urgent_ptr=0,
+        payload=b''
+    )
+    syn_tcp_bytes = syn_tcp.to_bytes(src_ip, dest_ip)
+
+    syn_ip = IPHeader(
+        version=4,
+        ihl=5,
+        tos=0,
+        total_length=20 + len(syn_tcp_bytes),
+        identification=1,
+        flags_offset=0,
+        ttl=64,
+        protocol=protocols.PROTO_TCP,
+        checksum=0,
+        src_ip=src_ip,
+        dest_ip=dest_ip
+    )
+    syn_ip_bytes = syn_ip.to_bytes()
+
+    syn_packet = syn_ip_bytes + syn_tcp_bytes
+    print(f"   SYN: seq={my_seq}")
+
+    frame = phy.encode_frame(syn_packet)
+    padding = np.zeros(int(0.5 * phy.SAMPLE_RATE), dtype=np.float32)
+    wave = np.concatenate([padding, frame, padding])
+    sd.play(wave, phy.SAMPLE_RATE)
+    sd.wait()
+
+    print("\n2. Listening for SYN-ACK...")
+    # TODO: Listen, parse, verify SYN-ACK
+
+    print("\n3. Sending ACK...")
+    # TODO: Build and send ACK
+
+    print("\n=== TCP Client Complete ===\n")
+
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: python main.py <command>")
