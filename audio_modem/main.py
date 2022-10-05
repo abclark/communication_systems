@@ -402,7 +402,28 @@ def tcp_client():
     sd.wait()
 
     print("\n2. Listening for SYN-ACK...")
-    # TODO: Listen, parse, verify SYN-ACK
+    num_samples = int(15 * phy.SAMPLE_RATE)
+    recording = sd.rec(num_samples, samplerate=phy.SAMPLE_RATE, channels=1, dtype='float32')
+    sd.wait()
+    recording = recording.flatten()
+
+    received = phy.decode_frame(recording)
+    rx_ip = IPHeader.from_bytes(received)
+    rx_tcp = TCPHeader.from_bytes(received[rx_ip.ihl * 4:])
+    print(f"   {rx_ip}")
+    print(f"   {rx_tcp}")
+
+    expected_flags = protocols.TCP_FLAG_SYN | protocols.TCP_FLAG_ACK
+    if (rx_tcp.flags & expected_flags) != expected_flags:
+        print("   Not a SYN-ACK, aborting.")
+        return
+
+    if rx_tcp.ack_num != my_seq + 1:
+        print(f"   Wrong ACK number (expected {my_seq + 1}, got {rx_tcp.ack_num})")
+        return
+
+    their_seq = rx_tcp.seq_num
+    print(f"   Valid SYN-ACK! their_seq={their_seq}")
 
     print("\n3. Sending ACK...")
     # TODO: Build and send ACK
