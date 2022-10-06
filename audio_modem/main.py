@@ -426,7 +426,43 @@ def tcp_client():
     print(f"   Valid SYN-ACK! their_seq={their_seq}")
 
     print("\n3. Sending ACK...")
-    # TODO: Build and send ACK
+    ack_tcp = TCPHeader(
+        src_port=src_port,
+        dest_port=dest_port,
+        seq_num=my_seq + 1,
+        ack_num=their_seq + 1,
+        flags=protocols.TCP_FLAG_ACK,
+        window=65535,
+        checksum=0,
+        urgent_ptr=0,
+        payload=b''
+    )
+    ack_tcp_bytes = ack_tcp.to_bytes(src_ip, dest_ip)
+
+    ack_ip = IPHeader(
+        version=4,
+        ihl=5,
+        tos=0,
+        total_length=20 + len(ack_tcp_bytes),
+        identification=2,
+        flags_offset=0,
+        ttl=64,
+        protocol=protocols.PROTO_TCP,
+        checksum=0,
+        src_ip=src_ip,
+        dest_ip=dest_ip
+    )
+    ack_ip_bytes = ack_ip.to_bytes()
+
+    ack_packet = ack_ip_bytes + ack_tcp_bytes
+    print(f"   ACK: seq={my_seq + 1}, ack={their_seq + 1}")
+
+    frame = phy.encode_frame(ack_packet)
+    wave = np.concatenate([padding, frame, padding])
+    sd.play(wave, phy.SAMPLE_RATE)
+    sd.wait()
+
+    print("\n   === CONNECTION ESTABLISHED ===")
 
     print("\n=== TCP Client Complete ===\n")
 
