@@ -351,6 +351,28 @@ def tcp_server():
     sd.wait()
     print("   Sent!")
 
+    print("\n4. Listening for ACK...")
+    num_samples = int(15 * phy.SAMPLE_RATE)
+    recording = sd.rec(num_samples, samplerate=phy.SAMPLE_RATE, channels=1, dtype='float32')
+    sd.wait()
+    recording = recording.flatten()
+
+    received = phy.decode_frame(recording)
+    rx_ip = IPHeader.from_bytes(received)
+    rx_tcp = TCPHeader.from_bytes(received[rx_ip.ihl * 4:])
+    print(f"   {rx_ip}")
+    print(f"   {rx_tcp}")
+
+    if not (rx_tcp.flags & protocols.TCP_FLAG_ACK):
+        print("   Not an ACK, handshake failed.")
+        return
+
+    if rx_tcp.ack_num != my_seq + 1:
+        print(f"   Wrong ACK number (expected {my_seq + 1}, got {rx_tcp.ack_num})")
+        return
+
+    print("\n   === CONNECTION ESTABLISHED ===")
+
     print("\n=== TCP Server Complete ===\n")
 
 
