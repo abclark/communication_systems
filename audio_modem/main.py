@@ -292,8 +292,8 @@ def listen_for_packet(timeout=10):
 def tcp_server():
     print("=== TCP Server (waiting for SYN) ===\n")
 
-    print("1. Listening for SYN...")
-    num_samples = int(30 * phy.SAMPLE_RATE)
+    print("1. Listening for SYN (10s)...")
+    num_samples = int(10 * phy.SAMPLE_RATE)
     recording = sd.rec(num_samples, samplerate=phy.SAMPLE_RATE, channels=1, dtype='float32')
     sd.wait()
     recording = recording.flatten()
