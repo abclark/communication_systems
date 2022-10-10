@@ -12,6 +12,20 @@ SYNC_WORD = bytes([0xDE, 0xAD])
 HEADER = PREAMBLE + SYNC_WORD
 
 
+def crc8(data):
+    """CRC-8: x^8 + x^2 + x + 1"""
+    crc = 0
+    for byte in data:
+        crc ^= byte
+        for _ in range(8):
+            if crc & 0x80:
+                crc = (crc << 1) ^ 0x07
+            else:
+                crc <<= 1
+            crc &= 0xFF
+    return crc
+
+
 def generate_tone(frequency, duration, sample_rate=SAMPLE_RATE, amplitude=0.5):
     num_samples = int(sample_rate * duration)
     t = np.arange(num_samples) / sample_rate
@@ -74,7 +88,9 @@ def decode_bytes(samples, num_bytes):
 def encode_frame(payload):
     if len(payload) > 255:
         raise ValueError("Payload too long (max 255 bytes)")
-    frame = HEADER + bytes([len(payload)]) + payload
+    length_and_payload = bytes([len(payload)]) + payload
+    checksum = crc8(length_and_payload)
+    frame = HEADER + length_and_payload + bytes([checksum])
     return encode_bytes(frame)
 
 
@@ -98,6 +114,16 @@ def decode_frame(recording):
     payload_offset = length_offset + samples_per_byte
     payload_samples = recording[payload_offset:payload_offset + payload_length * samples_per_byte]
     payload = decode_bytes(payload_samples, payload_length)
+
+    crc_offset = payload_offset + payload_length * samples_per_byte
+    crc_samples = recording[crc_offset:crc_offset + samples_per_byte]
+    received_crc = decode_byte(crc_samples)
+
+    length_and_payload = bytes([payload_length]) + payload
+    expected_crc = crc8(length_and_payload)
+
+    if received_crc != expected_crc:
+        return None
 
     return payload
 
