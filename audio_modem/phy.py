@@ -1,4 +1,6 @@
 import numpy as np
+import threading
+import queue
 
 SAMPLE_RATE = 44100
 FREQ_0 = 1000
@@ -133,6 +135,7 @@ class AudioDevice:
         import sounddevice as sd
         self.sd = sd
         self.padding_samples = int(0.5 * SAMPLE_RATE)
+        self.rx_queue = queue.Queue()
 
     def write(self, packet_bytes):
         frame = encode_frame(packet_bytes)
