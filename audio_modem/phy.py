@@ -136,6 +136,29 @@ class AudioDevice:
         self.sd = sd
         self.padding_samples = int(0.5 * SAMPLE_RATE)
         self.rx_queue = queue.Queue()
+        self.receiving = False
+        self.rx_thread = None
+
+    def start_receiving(self):
+        self.receiving = True
+        self.rx_thread = threading.Thread(target=self._rx_loop)
+        self.rx_thread.start()
+
+    def stop_receiving(self):
+        self.receiving = False
+        if self.rx_thread:
+            self.rx_thread.join()
+
+    def _rx_loop(self):
+        chunk_duration = 5
+        while self.receiving:
+            num_samples = int(chunk_duration * SAMPLE_RATE)
+            recording = self.sd.rec(num_samples, samplerate=SAMPLE_RATE, channels=1, dtype='float32')
+            self.sd.wait()
+            if not self.receiving:
+                break
+            recording = recording.flatten()
+            # TODO: decode and queue valid packets
 
     def write(self, packet_bytes):
         frame = encode_frame(packet_bytes)
