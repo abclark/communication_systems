@@ -158,7 +158,12 @@ class AudioDevice:
             if not self.receiving:
                 break
             recording = recording.flatten()
-            # TODO: decode and queue valid packets
+            try:
+                packet = decode_frame(recording)
+                if packet is not None:
+                    self.rx_queue.put(packet)
+            except:
+                pass
 
     def write(self, packet_bytes):
         frame = encode_frame(packet_bytes)
