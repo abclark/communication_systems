@@ -172,12 +172,8 @@ class AudioDevice:
         self.sd.play(wave, SAMPLE_RATE)
         self.sd.wait()
 
-    def read(self, timeout=10):
-        num_samples = int(timeout * SAMPLE_RATE)
-        recording = self.sd.rec(num_samples, samplerate=SAMPLE_RATE, channels=1, dtype='float32')
-        self.sd.wait()
-        recording = recording.flatten()
-        return decode_frame(recording)
+    def read(self, timeout=None):
+        return self.rx_queue.get(timeout=timeout)
 
     def close(self):
         pass
