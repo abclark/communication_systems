@@ -176,4 +176,4 @@ class AudioDevice:
         return self.rx_queue.get(timeout=timeout)
 
     def close(self):
-        pass
+        self.stop_receiving()
