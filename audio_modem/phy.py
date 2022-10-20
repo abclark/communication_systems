@@ -166,6 +166,9 @@ class AudioDevice:
                 pass
 
     def write(self, packet_bytes):
+        was_receiving = self.receiving
+        self.stop_receiving()
+
         frame = encode_frame(packet_bytes)
         silence = np.zeros(self.padding_samples, dtype=np.float32)
         wave = np.concatenate([silence, frame, silence])
