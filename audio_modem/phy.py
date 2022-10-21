@@ -175,6 +175,9 @@ class AudioDevice:
         self.sd.play(wave, SAMPLE_RATE)
         self.sd.wait()
 
+        if was_receiving:
+            self.start_receiving()
+
     def read(self, timeout=None):
         return self.rx_queue.get(timeout=timeout)
 
