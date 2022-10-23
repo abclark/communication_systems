@@ -489,10 +489,28 @@ def tcp_client():
     print("\n=== TCP Client Complete ===\n")
 
 
+def audio_stack():
+    print("=== Audio TCP/IP Stack ===\n")
+
+    device = phy.AudioDevice()
+    device.start_receiving()
+    print("Listening...")
+
+    try:
+        while True:
+            packet = device.read()
+            print(f"Received {len(packet)} bytes")
+            # TODO: dispatch to handlers
+    except KeyboardInterrupt:
+        print("\nShutting down...")
+    finally:
+        device.close()
+
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: python main.py <command>")
-        print("Commands: server, client, syn, listen")
+        print("Commands: server, client, syn, listen, stack")
         return
 
     command = sys.argv[1]
@@ -506,6 +524,8 @@ def main():
     elif command == 'listen':
         timeout = int(sys.argv[2]) if len(sys.argv) > 2 else 10
         listen_for_packet(timeout)
+    elif command == 'stack':
+        audio_stack()
     else:
         print(f"Unknown command: {command}")
 
