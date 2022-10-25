@@ -5,6 +5,8 @@ import sounddevice as sd
 import numpy as np
 import phy
 from packet_headers import IPHeader, ICMPMessage, TCPHeader
+from tcp_handler import handle_tcp_packet
+from icmp_handler import handle_icmp_packet
 import protocols
 
 
@@ -499,8 +501,17 @@ def audio_stack():
     try:
         while True:
             packet = device.read()
-            print(f"Received {len(packet)} bytes")
-            # TODO: dispatch to handlers
+            ip_header = IPHeader.from_bytes(packet)
+            print(f"--- Received: {ip_header}")
+
+            ip_header_length = ip_header.ihl * 4
+
+            if ip_header.protocol == protocols.PROTO_TCP:
+                tcp_bytes = packet[ip_header_length:]
+                handle_tcp_packet(device, ip_header, tcp_bytes)
+            elif ip_header.protocol == protocols.PROTO_ICMP:
+                icmp_bytes = packet[ip_header_length:]
+                handle_icmp_packet(device, ip_header, icmp_bytes)
     except KeyboardInterrupt:
         print("\nShutting down...")
     finally:
