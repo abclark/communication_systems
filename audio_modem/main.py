@@ -426,12 +426,22 @@ def tcp_client():
     sd.wait()
 
     print("\n2. Listening for SYN-ACK...")
-    num_samples = int(15 * phy.SAMPLE_RATE)
-    recording = sd.rec(num_samples, samplerate=phy.SAMPLE_RATE, channels=1, dtype='float32')
-    sd.wait()
-    recording = recording.flatten()
+    received = None
+    for attempt in range(3):
+        num_samples = int(15 * phy.SAMPLE_RATE)
+        recording = sd.rec(num_samples, samplerate=phy.SAMPLE_RATE, channels=1, dtype='float32')
+        sd.wait()
+        recording = recording.flatten()
 
-    received = phy.decode_frame(recording)
+        received = phy.decode_frame(recording)
+        if received is not None:
+            break
+        print(f"   Attempt {attempt + 1} failed, retrying...")
+
+    if received is None:
+        print("   No valid SYN-ACK received, aborting.")
+        return
+
     rx_ip = IPHeader.from_bytes(received)
     rx_tcp = TCPHeader.from_bytes(received[rx_ip.ihl * 4:])
     print(f"   {rx_ip}")
@@ -501,17 +511,23 @@ def audio_stack():
     try:
         while True:
             packet = device.read()
-            ip_header = IPHeader.from_bytes(packet)
-            print(f"--- Received: {ip_header}")
+            if packet is None or len(packet) < 20:
+                continue
 
-            ip_header_length = ip_header.ihl * 4
+            try:
+                ip_header = IPHeader.from_bytes(packet)
+                print(f"--- Received: {ip_header}")
 
-            if ip_header.protocol == protocols.PROTO_TCP:
-                tcp_bytes = packet[ip_header_length:]
-                handle_tcp_packet(device, ip_header, tcp_bytes)
-            elif ip_header.protocol == protocols.PROTO_ICMP:
-                icmp_bytes = packet[ip_header_length:]
-                handle_icmp_packet(device, ip_header, icmp_bytes)
+                ip_header_length = ip_header.ihl * 4
+
+                if ip_header.protocol == protocols.PROTO_TCP:
+                    tcp_bytes = packet[ip_header_length:]
+                    handle_tcp_packet(device, ip_header, tcp_bytes)
+                elif ip_header.protocol == protocols.PROTO_ICMP:
+                    icmp_bytes = packet[ip_header_length:]
+                    handle_icmp_packet(device, ip_header, icmp_bytes)
+            except ValueError:
+                continue
     except KeyboardInterrupt:
         print("\nShutting down...")
     finally:
