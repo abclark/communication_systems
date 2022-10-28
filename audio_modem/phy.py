@@ -96,38 +96,63 @@ def encode_frame(payload):
     return encode_bytes(frame)
 
 
-def find_frame_offset(recording):
+def find_frame_offset(recording, min_correlation=0.1):
     header_signal = encode_bytes(HEADER)
     correlation = np.correlate(recording, header_signal, mode='valid')
-    offset = np.argmax(np.abs(correlation))
+    abs_correlation = np.abs(correlation)
+    offset = np.argmax(abs_correlation)
+    peak = abs_correlation[offset]
+
+    # Normalize by the energy of the header signal
+    header_energy = np.sum(header_signal ** 2)
+    normalized_peak = peak / header_energy
+
+    if normalized_peak < min_correlation:
+        return None  # No significant signal detected
+
     return offset
 
 
 def decode_frame(recording):
+    """Returns (payload, samples_consumed) or (None, 0)."""
     offset = find_frame_offset(recording)
+    if offset is None:
+        return (None, 0)
+
     samples_per_byte = SAMPLES_PER_BIT * 8
 
     header_samples = len(HEADER) * samples_per_byte
     length_offset = offset + header_samples
 
+    if length_offset + samples_per_byte > len(recording):
+        return (None, 0)
+
     length_samples = recording[length_offset:length_offset + samples_per_byte]
     payload_length = decode_byte(length_samples)
 
+    if payload_length == 0:
+        return (None, 0)
+
     payload_offset = length_offset + samples_per_byte
-    payload_samples = recording[payload_offset:payload_offset + payload_length * samples_per_byte]
+    crc_offset = payload_offset + payload_length * samples_per_byte
+    frame_end = crc_offset + samples_per_byte
+
+    if frame_end > len(recording):
+        return (None, 0)
+
+    payload_samples = recording[payload_offset:crc_offset]
     payload = decode_bytes(payload_samples, payload_length)
 
-    crc_offset = payload_offset + payload_length * samples_per_byte
-    crc_samples = recording[crc_offset:crc_offset + samples_per_byte]
+    crc_samples = recording[crc_offset:frame_end]
     received_crc = decode_byte(crc_samples)
 
     length_and_payload = bytes([payload_length]) + payload
     expected_crc = crc8(length_and_payload)
 
     if received_crc != expected_crc:
-        return None
+        return (None, 0)
 
-    return payload
+    return (payload, frame_end)
 
 
 class AudioDevice:
@@ -150,8 +175,9 @@ class AudioDevice:
             self.rx_thread.join()
 
     def _rx_loop(self):
-        chunk_duration = 5
+        chunk_duration = 6
         while self.receiving:
+            print(f"[RX] Recording {chunk_duration}s chunk...")
             num_samples = int(chunk_duration * SAMPLE_RATE)
             recording = self.sd.rec(num_samples, samplerate=SAMPLE_RATE, channels=1, dtype='float32')
             self.sd.wait()
@@ -159,11 +185,14 @@ class AudioDevice:
                 break
             recording = recording.flatten()
             try:
-                packet = decode_frame(recording)
+                packet, _ = decode_frame(recording)
                 if packet is not None:
+                    print(f"[RX] Got packet: {len(packet)} bytes")
                     self.rx_queue.put(packet)
-            except:
-                pass
+                else:
+                    print("[RX] CRC failed or no packet")
+            except Exception as e:
+                print(f"[RX] Exception: {e}")
 
     def write(self, packet_bytes):
         was_receiving = self.receiving

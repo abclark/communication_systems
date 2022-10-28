@@ -88,7 +88,7 @@ def test_loopback():
     recording = recording.flatten()
 
     print("3. Decoding frame...")
-    decoded = phy.decode_frame(recording)
+    decoded, _ = phy.decode_frame(recording)
 
     status = "SUCCESS" if decoded == test_message else "FAILED"
     print(f"\n   Sent:     {test_message}")
@@ -158,7 +158,7 @@ def test_audio_device():
     recording = recording.flatten()
 
     print("3. Decoding...")
-    received = phy.decode_frame(recording)
+    received, _ = phy.decode_frame(recording)
 
     status = "SUCCESS" if received == fake_ip_packet else "FAILED"
     print(f"\n   Sent:     {fake_ip_packet.hex()}")
@@ -243,7 +243,7 @@ def test_tcp_syn():
     recording = recording.flatten()
 
     print("3. Decoding received audio...")
-    received = phy.decode_frame(recording)
+    received, _ = phy.decode_frame(recording)
 
     status = "SUCCESS" if received == packet else "FAILED"
     print(f"   Sent:     {packet.hex()}")
@@ -272,7 +272,7 @@ def listen_for_packet(timeout=10):
     recording = recording.flatten()
 
     print("Decoding...")
-    received = phy.decode_frame(recording)
+    received, _ = phy.decode_frame(recording)
     print(f"Received {len(received)} bytes: {received.hex()}")
 
     print("Parsing...")
@@ -300,7 +300,7 @@ def tcp_server():
     sd.wait()
     recording = recording.flatten()
 
-    received = phy.decode_frame(recording)
+    received, _ = phy.decode_frame(recording)
     ip_header = IPHeader.from_bytes(received)
     tcp_header = TCPHeader.from_bytes(received[ip_header.ihl * 4:])
     print(f"   {ip_header}")
@@ -359,7 +359,7 @@ def tcp_server():
     sd.wait()
     recording = recording.flatten()
 
-    received = phy.decode_frame(recording)
+    received, _ = phy.decode_frame(recording)
     rx_ip = IPHeader.from_bytes(received)
     rx_tcp = TCPHeader.from_bytes(received[rx_ip.ihl * 4:])
     print(f"   {rx_ip}")
@@ -428,14 +428,22 @@ def tcp_client():
     print("\n2. Listening for SYN-ACK...")
     received = None
     for attempt in range(3):
-        num_samples = int(15 * phy.SAMPLE_RATE)
+        num_samples = int(20 * phy.SAMPLE_RATE)
         recording = sd.rec(num_samples, samplerate=phy.SAMPLE_RATE, channels=1, dtype='float32')
         sd.wait()
         recording = recording.flatten()
 
-        received = phy.decode_frame(recording)
-        if received is not None:
-            break
+        decoded, _ = phy.decode_frame(recording)
+
+        if decoded is not None and len(decoded) >= 40:
+            try:
+                ip = IPHeader.from_bytes(decoded)
+                if ip.version == 4 and ip.protocol == protocols.PROTO_TCP:
+                    received = decoded
+                    break
+            except:
+                pass
+
         print(f"   Attempt {attempt + 1} failed, retrying...")
 
     if received is None:
