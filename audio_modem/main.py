@@ -15,14 +15,6 @@ def play(samples, sample_rate=phy.SAMPLE_RATE):
     sd.wait()
 
 
-def record(duration, sample_rate=phy.SAMPLE_RATE):
-    num_samples = int(sample_rate * duration)
-    print(f"   Recording {duration} seconds...")
-    recording = sd.rec(num_samples, samplerate=sample_rate, channels=1, dtype='float32')
-    sd.wait()
-    return recording.flatten()
-
-
 def test_roundtrip():
     print("=== Testing Encode → Decode Roundtrip ===\n")
 

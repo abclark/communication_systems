@@ -1,3 +1,4 @@
+import time
 import numpy as np
 import threading
 import queue
@@ -161,41 +162,63 @@ class AudioDevice:
         self.sd = sd
         self.padding_samples = int(0.5 * SAMPLE_RATE)
         self.rx_queue = queue.Queue()
-        self.receiving = False
-        self.rx_thread = None
+        self.buffer = np.array([], dtype=np.float32)
+        self.buffer_lock = threading.Lock()
+        self.stream = None
+        self.running = False
+        self.scan_thread = None
+
+    def _audio_callback(self, indata, frames, time, status):
+        with self.buffer_lock:
+            self.buffer = np.append(self.buffer, indata.flatten())
+
+    def _scan_loop(self):
+        max_buffer_samples = SAMPLE_RATE * 20
+        min_frame_samples = SAMPLES_PER_BIT * 8 * 6
+
+        while self.running:
+            time.sleep(1.0)
+
+            with self.buffer_lock:
+                if len(self.buffer) < min_frame_samples:
+                    continue
+                buffer_copy = self.buffer.copy()
+
+            payload, consumed = decode_frame(buffer_copy)
+
+            with self.buffer_lock:
+                if payload is not None:
+                    self.rx_queue.put(payload)
+                    self.buffer = self.buffer[consumed:]
+                elif len(self.buffer) > max_buffer_samples:
+                    self.buffer = self.buffer[-max_buffer_samples:]
 
     def start_receiving(self):
-        self.receiving = True
-        self.rx_thread = threading.Thread(target=self._rx_loop)
-        self.rx_thread.start()
+        self.running = True
+        with self.buffer_lock:
+            self.buffer = np.array([], dtype=np.float32)
+        self.stream = self.sd.InputStream(
+            samplerate=SAMPLE_RATE,
+            channels=1,
+            dtype='float32',
+            callback=self._audio_callback
+        )
+        self.stream.start()
+        self.scan_thread = threading.Thread(target=self._scan_loop)
+        self.scan_thread.start()
 
     def stop_receiving(self):
-        self.receiving = False
-        if self.rx_thread:
-            self.rx_thread.join()
-
-    def _rx_loop(self):
-        chunk_duration = 6
-        while self.receiving:
-            print(f"[RX] Recording {chunk_duration}s chunk...")
-            num_samples = int(chunk_duration * SAMPLE_RATE)
-            recording = self.sd.rec(num_samples, samplerate=SAMPLE_RATE, channels=1, dtype='float32')
-            self.sd.wait()
-            if not self.receiving:
-                break
-            recording = recording.flatten()
-            try:
-                packet, _ = decode_frame(recording)
-                if packet is not None:
-                    print(f"[RX] Got packet: {len(packet)} bytes")
-                    self.rx_queue.put(packet)
-                else:
-                    print("[RX] CRC failed or no packet")
-            except Exception as e:
-                print(f"[RX] Exception: {e}")
+        self.running = False
+        if self.stream:
+            self.stream.stop()
+            self.stream.close()
+            self.stream = None
+        if self.scan_thread:
+            self.scan_thread.join()
+            self.scan_thread = None
 
     def write(self, packet_bytes):
-        was_receiving = self.receiving
+        was_running = self.running
         self.stop_receiving()
 
         frame = encode_frame(packet_bytes)
@@ -204,7 +227,7 @@ class AudioDevice:
         self.sd.play(wave, SAMPLE_RATE)
         self.sd.wait()
 
-        if was_receiving:
+        if was_running:
             self.start_receiving()
 
     def read(self, timeout=None):
