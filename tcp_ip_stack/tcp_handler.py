@@ -55,10 +55,11 @@ def handle_tcp_packet(tun, ip_header, tcp_bytes):
                 
                 payload_str = tcp_header.payload.decode('utf-8', errors='replace')
                 clean_payload = payload_str.strip()
-                reversed_payload = clean_payload[::-1] + "\n"
-                reply_payload = reversed_payload.encode('utf-8')
+                print(f"   Message: {clean_payload}")
+                reply = input("   Reply: ")
+                reply_payload = (reply + "\n").encode('utf-8')
                 
-                print(f"   >>> Sending Data Reply: {reversed_payload.strip()}")
+                print(f"   >>> Sending: {reply}")
 
                 send_tcp_packet(tun, ip_header, tcp_header, conn.my_seq_num, conn.my_ack_num, protocols.TCP_FLAG_PSH | protocols.TCP_FLAG_ACK, reply_payload)
                 

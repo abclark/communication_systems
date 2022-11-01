@@ -496,7 +496,83 @@ def tcp_client():
     sd.play(wave, phy.SAMPLE_RATE)
     sd.wait()
 
-    print("\n   === CONNECTION ESTABLISHED ===")
+    print("\n   === CONNECTION ESTABLISHED ===\n")
+
+    # Track sequence numbers for data transfer
+    next_seq = my_seq + 1
+    next_ack = their_seq + 1
+
+    while True:
+        try:
+            message = input("Enter message (or 'quit'): ")
+        except EOFError:
+            break
+
+        if message.lower() == 'quit':
+            break
+        if not message:
+            continue
+
+        payload = message.encode('utf-8')
+        print(f"   Sending: {message}")
+
+        data_tcp = TCPHeader(
+            src_port=src_port,
+            dest_port=dest_port,
+            seq_num=next_seq,
+            ack_num=next_ack,
+            flags=protocols.TCP_FLAG_PSH | protocols.TCP_FLAG_ACK,
+            window=65535,
+            checksum=0,
+            urgent_ptr=0,
+            payload=payload
+        )
+        data_tcp_bytes = data_tcp.to_bytes(src_ip, dest_ip)
+
+        data_ip = IPHeader(
+            version=4,
+            ihl=5,
+            tos=0,
+            total_length=20 + len(data_tcp_bytes),
+            identification=3,
+            flags_offset=0,
+            ttl=64,
+            protocol=protocols.PROTO_TCP,
+            checksum=0,
+            src_ip=src_ip,
+            dest_ip=dest_ip
+        )
+        data_packet = data_ip.to_bytes() + data_tcp_bytes
+
+        frame = phy.encode_frame(data_packet)
+        wave = np.concatenate([padding, frame, padding])
+        sd.play(wave, phy.SAMPLE_RATE)
+        sd.wait()
+
+        next_seq += len(payload)
+
+        print("   Waiting for echo...")
+        num_samples = int(20 * phy.SAMPLE_RATE)
+        recording = sd.rec(num_samples, samplerate=phy.SAMPLE_RATE, channels=1, dtype='float32')
+        sd.wait()
+        decoded, _ = phy.decode_frame(recording.flatten())
+
+        if decoded is None:
+            print("   No response received")
+            continue
+
+        try:
+            rx_ip = IPHeader.from_bytes(decoded)
+            rx_tcp = TCPHeader.from_bytes(decoded[rx_ip.ihl * 4:])
+            print(f"--- Received: {rx_ip}")
+            print("--- PARSED TCP HEADER ---")
+            print(rx_tcp)
+            if rx_tcp.payload:
+                echo = rx_tcp.payload.decode('utf-8', errors='replace').strip()
+                print(f"   Received: {echo}")
+                next_ack = rx_tcp.seq_num + len(rx_tcp.payload)
+        except ValueError as e:
+            print(f"   Error parsing response: {e}")
 
     print("\n=== TCP Client Complete ===\n")
 
