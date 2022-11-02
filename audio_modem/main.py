@@ -552,14 +552,10 @@ def tcp_client():
         next_seq += len(payload)
 
         print("   Waiting for reply...")
-        while True:
-            num_samples = int(10 * phy.SAMPLE_RATE)
-            recording = sd.rec(num_samples, samplerate=phy.SAMPLE_RATE, channels=1, dtype='float32')
-            sd.wait()
-            decoded, _ = phy.decode_frame(recording.flatten())
-            if decoded is not None:
-                break
-            print("   (still waiting...)")
+        device = phy.AudioDevice()
+        device.start_receiving()
+        decoded = device.read()
+        device.close()
 
         try:
             rx_ip = IPHeader.from_bytes(decoded)
