@@ -551,15 +551,15 @@ def tcp_client():
 
         next_seq += len(payload)
 
-        print("   Waiting for echo...")
-        num_samples = int(20 * phy.SAMPLE_RATE)
-        recording = sd.rec(num_samples, samplerate=phy.SAMPLE_RATE, channels=1, dtype='float32')
-        sd.wait()
-        decoded, _ = phy.decode_frame(recording.flatten())
-
-        if decoded is None:
-            print("   No response received")
-            continue
+        print("   Waiting for reply...")
+        while True:
+            num_samples = int(10 * phy.SAMPLE_RATE)
+            recording = sd.rec(num_samples, samplerate=phy.SAMPLE_RATE, channels=1, dtype='float32')
+            sd.wait()
+            decoded, _ = phy.decode_frame(recording.flatten())
+            if decoded is not None:
+                break
+            print("   (still waiting...)")
 
         try:
             rx_ip = IPHeader.from_bytes(decoded)
