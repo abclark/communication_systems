@@ -29,7 +29,7 @@ def crc8(data):
     return crc
 
 
-def generate_tone(frequency, duration, sample_rate=SAMPLE_RATE, amplitude=0.5):
+def generate_tone(frequency, duration, sample_rate=SAMPLE_RATE, amplitude=1.0):
     num_samples = int(sample_rate * duration)
     t = np.arange(num_samples) / sample_rate
     wave = amplitude * np.sin(2 * np.pi * frequency * t)
