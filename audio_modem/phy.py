@@ -29,7 +29,7 @@ def crc8(data):
     return crc
 
 
-def generate_tone(frequency, duration, sample_rate=SAMPLE_RATE, amplitude=1.0):
+def generate_tone(frequency, duration, sample_rate=SAMPLE_RATE, amplitude=0.5):
     num_samples = int(sample_rate * duration)
     t = np.arange(num_samples) / sample_rate
     wave = amplitude * np.sin(2 * np.pi * frequency * t)
@@ -116,6 +116,10 @@ def find_frame_offset(recording, min_correlation=0.1):
 
 def decode_frame(recording):
     """Returns (payload, samples_consumed) or (None, 0)."""
+    max_val = np.max(np.abs(recording))
+    if max_val > 0.01:
+        recording = recording / max_val
+
     offset = find_frame_offset(recording)
     if offset is None:
         return (None, 0)
