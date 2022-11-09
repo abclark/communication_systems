@@ -113,10 +113,10 @@ def handle_tcp_packet(tun, ip_header, tcp_bytes):
     except ValueError as e:
         print(f"Error parsing TCP message: {e}", file=sys.stderr)
 
-def send_tcp_packet(tun, ip_header, incoming_tcp, seq, ack, flags, payload=b''):
-    reply_tcp = TCPHeader(
-        src_port=incoming_tcp.dest_port,
-        dest_port=incoming_tcp.src_port,
+def send_tcp_raw(tun, src_ip, src_port, dest_ip, dest_port, seq, ack, flags, payload=b''):
+    tcp = TCPHeader(
+        src_port=src_port,
+        dest_port=dest_port,
         seq_num=seq,
         ack_num=ack,
         flags=flags,
@@ -125,21 +125,34 @@ def send_tcp_packet(tun, ip_header, incoming_tcp, seq, ack, flags, payload=b''):
         urgent_ptr=0,
         payload=payload
     )
-    reply_tcp_bytes = reply_tcp.to_bytes(ip_header.dest_ip, ip_header.src_ip) 
+    tcp_bytes = tcp.to_bytes(src_ip, dest_ip)
 
-    reply_ip = IPHeader(
+    ip = IPHeader(
         version=4,
         ihl=5,
         tos=0,
-        total_length=20 + len(reply_tcp_bytes),
+        total_length=20 + len(tcp_bytes),
         identification=0,
         flags_offset=0,
         ttl=64,
         protocol=protocols.PROTO_TCP,
         checksum=0,
-        src_ip=ip_header.dest_ip,
-        dest_ip=ip_header.src_ip
+        src_ip=src_ip,
+        dest_ip=dest_ip
     )
-    reply_ip_bytes = reply_ip.to_bytes()
+    ip_bytes = ip.to_bytes()
+    tun.write(ip_bytes + tcp_bytes)
 
-    tun.write(reply_ip_bytes + reply_tcp_bytes)
+
+def send_tcp_packet(tun, ip_header, incoming_tcp, seq, ack, flags, payload=b''):
+    send_tcp_raw(
+        tun,
+        src_ip=ip_header.dest_ip,
+        src_port=incoming_tcp.dest_port,
+        dest_ip=ip_header.src_ip,
+        dest_port=incoming_tcp.src_port,
+        seq=seq,
+        ack=ack,
+        flags=flags,
+        payload=payload
+    )
