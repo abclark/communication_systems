@@ -6,17 +6,31 @@ from packet_headers import IPHeader, TCPHeader
 import protocols
 
 class TCPConnection:
-    def __init__(self, key, isn, ack):
-        self.key = key
-        self.state = 'SYN_RECEIVED'
-        self.my_seq_num = isn
-        self.my_ack_num = ack
+    def __init__(self, src_ip, src_port, dest_ip, dest_port):
+        self.src_ip = src_ip
+        self.src_port = src_port
+        self.dest_ip = dest_ip
+        self.dest_port = dest_port
+        self.my_seq_num = 0
+        self.my_ack_num = 0
+        self.state = 'CLOSED'
 
-    def establish(self):
-        self.state = 'ESTABLISHED'
-        self.my_seq_num += 1
+    @property
+    def key(self):
+        return (self.src_ip, self.src_port, self.dest_ip, self.dest_port)
 
 tcp_connections = {}
+
+def tcp_connect(tun, src_ip, src_port, dest_ip, dest_port):
+    conn = TCPConnection(src_ip, src_port, dest_ip, dest_port)
+    conn.my_seq_num = random.randint(0, 2**32 - 1)
+    conn.state = 'SYN_SENT'
+    tcp_connections[conn.key] = conn
+
+    print(f"   >>> Sending SYN to {dest_ip}:{dest_port}...")
+    send_tcp_raw(tun, src_ip, src_port, dest_ip, dest_port,
+                 conn.my_seq_num, 0, protocols.TCP_FLAG_SYN)
+    return conn
 
 def handle_tcp_packet(tun, ip_header, tcp_bytes):
     try:
@@ -28,17 +42,21 @@ def handle_tcp_packet(tun, ip_header, tcp_bytes):
         if payload_len > 0:
             print(f"   >>> Data: {tcp_header.payload.decode('utf-8', errors='replace')}")
 
-        conn_key = (ip_header.src_ip, tcp_header.src_port, ip_header.dest_ip, tcp_header.dest_port)
+        conn_key = (ip_header.dest_ip, tcp_header.dest_port, ip_header.src_ip, tcp_header.src_port)
         
-        if (tcp_header.flags & protocols.TCP_FLAG_SYN) and not (tcp_header.flags & protocols.TCP_FLAG_ACK): 
+        if (tcp_header.flags & protocols.TCP_FLAG_SYN) and not (tcp_header.flags & protocols.TCP_FLAG_ACK):
             print("   >>> Received SYN. Sending SYN-ACK...")
-            
-            my_isn = random.randint(0, 2**32 - 1)
-            their_ack_num = tcp_header.seq_num + 1
 
-            # Create new connection object
-            conn = TCPConnection(conn_key, my_isn, their_ack_num)
-            tcp_connections[conn_key] = conn
+            conn = TCPConnection(
+                ip_header.dest_ip,
+                tcp_header.dest_port,
+                ip_header.src_ip,
+                tcp_header.src_port
+            )
+            conn.my_seq_num = random.randint(0, 2**32 - 1)
+            conn.my_ack_num = tcp_header.seq_num + 1
+            conn.state = 'SYN_RECEIVED'
+            tcp_connections[conn.key] = conn
 
             send_tcp_packet(tun, ip_header, tcp_header, conn.my_seq_num, conn.my_ack_num, protocols.TCP_FLAG_SYN | protocols.TCP_FLAG_ACK)
 
@@ -47,7 +65,16 @@ def handle_tcp_packet(tun, ip_header, tcp_bytes):
 
             if (tcp_header.flags & protocols.TCP_FLAG_ACK) and conn.state == 'SYN_RECEIVED':
                 print("   >>> Received ACK. Connection ESTABLISHED.")
-                conn.establish()
+                conn.state = 'ESTABLISHED'
+                conn.my_seq_num += 1
+
+            if (tcp_header.flags & protocols.TCP_FLAG_SYN) and (tcp_header.flags & protocols.TCP_FLAG_ACK) and conn.state == 'SYN_SENT':
+                print("   >>> Received SYN-ACK. Sending ACK...")
+                conn.my_seq_num += 1
+                conn.my_ack_num = tcp_header.seq_num + 1
+                conn.state = 'ESTABLISHED'
+                send_tcp_packet(tun, ip_header, tcp_header, conn.my_seq_num, conn.my_ack_num, protocols.TCP_FLAG_ACK)
+                print("   >>> Connection ESTABLISHED.")
 
             if payload_len > 0:
                 print(f"   >>> Received {payload_len} bytes. Sending ACK...")
@@ -66,34 +93,21 @@ def handle_tcp_packet(tun, ip_header, tcp_bytes):
                 
                 conn.my_seq_num += len(reply_payload)
 
-            # --- Teardown: FIN ---
             if (tcp_header.flags & protocols.TCP_FLAG_FIN):
                 print("   >>> Received FIN. Sending ACK + FIN...")
-                
-                # FIN consumes 1 sequence number
                 conn.my_ack_num = tcp_header.seq_num + payload_len + 1
-                
-                # Send ACK to confirm their FIN
-                # AND send our own FIN to close our side
-                # Flags: FIN | ACK
                 send_tcp_packet(tun, ip_header, tcp_header, conn.my_seq_num, conn.my_ack_num, protocols.TCP_FLAG_FIN | protocols.TCP_FLAG_ACK)
-                
-                # Our FIN consumes 1 sequence number
                 conn.my_seq_num += 1
                 conn.state = 'LAST_ACK'
 
-            # --- Teardown: Final ACK ---
             elif (tcp_header.flags & protocols.TCP_FLAG_ACK) and conn.state == 'LAST_ACK':
                 print("   >>> Received Final ACK. Connection CLOSED.")
                 del tcp_connections[conn_key]
 
-        # 3. Unknown Connection (Closed/Listen State) - RFC 793
         else:
-            # If the state is CLOSED (i.e., data came for an unknown connection)
-            # An incoming segment not containing a RST causes a RST to be sent in response.
             if not (tcp_header.flags & protocols.TCP_FLAG_RST):
                 print("   >>> Unknown connection. Sending RST...")
-                
+
                 if tcp_header.flags & protocols.TCP_FLAG_ACK:
                     rst_seq = tcp_header.ack_num
                     rst_ack = 0
@@ -101,7 +115,6 @@ def handle_tcp_packet(tun, ip_header, tcp_bytes):
                 else:
                     rst_seq = 0
                     rst_ack = tcp_header.seq_num + payload_len
-                    # Consume phantom bytes
                     if tcp_header.flags & protocols.TCP_FLAG_SYN:
                         rst_ack += 1
                     if tcp_header.flags & protocols.TCP_FLAG_FIN:
