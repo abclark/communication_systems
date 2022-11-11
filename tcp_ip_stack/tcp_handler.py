@@ -49,21 +49,26 @@ def handle_tcp_packet(tun, ip_header, tcp_bytes):
                 conn.establish()
 
             if payload_len > 0:
-                print(f"   >>> Received {payload_len} bytes. Sending ACK...")
-                
-                conn.my_ack_num = tcp_header.seq_num + payload_len
-                
-                payload_str = tcp_header.payload.decode('utf-8', errors='replace')
-                clean_payload = payload_str.strip()
-                print(f"   Message: {clean_payload}")
-                reply = input("   Reply: ")
-                reply_payload = (reply + "\n").encode('utf-8')
-                
-                print(f"   >>> Sending: {reply}")
+                expected_seq = conn.my_ack_num
 
-                send_tcp_packet(tun, ip_header, tcp_header, conn.my_seq_num, conn.my_ack_num, protocols.TCP_FLAG_PSH | protocols.TCP_FLAG_ACK, reply_payload)
-                
-                conn.my_seq_num += len(reply_payload)
+                if tcp_header.seq_num < expected_seq:
+                    print(f"   >>> Retransmission (seq {tcp_header.seq_num} < expected {expected_seq}). Re-ACKing...")
+                    send_tcp_packet(tun, ip_header, tcp_header, conn.my_seq_num, conn.my_ack_num, protocols.TCP_FLAG_ACK)
+                else:
+                    print(f"   >>> Received {payload_len} bytes. Sending ACK...")
+                    conn.my_ack_num = tcp_header.seq_num + payload_len
+                    send_tcp_packet(tun, ip_header, tcp_header, conn.my_seq_num, conn.my_ack_num, protocols.TCP_FLAG_ACK)
+
+                    payload_str = tcp_header.payload.decode('utf-8', errors='replace')
+                    clean_payload = payload_str.strip()
+                    print(f"   Message: {clean_payload}")
+                    reply = input("   Reply: ")
+
+                    if reply:
+                        reply_payload = (reply + "\n").encode('utf-8')
+                        print(f"   >>> Sending: {reply}")
+                        send_tcp_packet(tun, ip_header, tcp_header, conn.my_seq_num, conn.my_ack_num, protocols.TCP_FLAG_PSH | protocols.TCP_FLAG_ACK, reply_payload)
+                        conn.my_seq_num += len(reply_payload)
 
             # --- Teardown: FIN ---
             if (tcp_header.flags & protocols.TCP_FLAG_FIN):
