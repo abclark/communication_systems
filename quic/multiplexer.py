@@ -10,6 +10,8 @@ STREAM_PORTS = {9001: 1, 9002: 2, 9003: 3}
 
 connections = {}
 next_global_seq = 1
+next_to_deliver = 1
+pending_messages = []
 
 
 def send_tcp(tun, src_ip, src_port, dest_ip, dest_port, seq, ack, flags):
@@ -97,7 +99,7 @@ def main():
 
                         payload = tcp_header.payload
                         if payload and conn['state'] == 'ESTABLISHED':
-                            global next_global_seq
+                            global next_global_seq, next_to_deliver
                             conn['our_ack'] = tcp_header.seq_num + len(payload)
                             send_tcp(
                                 tun,
@@ -112,7 +114,15 @@ def main():
                             data = payload.decode('utf-8', errors='replace').strip()
                             seq = next_global_seq
                             next_global_seq += 1
-                            print(f"[Stream {stream_id}] (seq {seq}) Data: {data}")
+
+                            pending_messages.append((seq, stream_id, data))
+                            print(f"[Stream {stream_id}] (seq {seq}) QUEUED: {data}")
+
+                            pending_messages.sort(key=lambda x: x[0])
+                            while pending_messages and pending_messages[0][0] == next_to_deliver:
+                                msg = pending_messages.pop(0)
+                                print(f"[Stream {msg[1]}] (seq {msg[0]}) DELIVERED: {msg[2]}")
+                                next_to_deliver += 1
 
 if __name__ == '__main__':
     try:
