@@ -12,6 +12,7 @@ connections = {}
 next_global_seq = 1
 next_to_deliver = 1
 pending_messages = []
+delayed_messages = []
 
 
 def send_tcp(tun, src_ip, src_port, dest_ip, dest_port, seq, ack, flags):
@@ -115,8 +116,17 @@ def main():
                             seq = next_global_seq
                             next_global_seq += 1
 
-                            pending_messages.append((seq, stream_id, data))
-                            print(f"[Stream {stream_id}] (seq {seq}) QUEUED: {data}")
+                            if data == "flush":
+                                for msg in delayed_messages:
+                                    pending_messages.append(msg)
+                                    print(f"[Stream {msg[1]}] (seq {msg[0]}) RELEASED: {msg[2]}")
+                                delayed_messages.clear()
+                            elif stream_id == 2:
+                                delayed_messages.append((seq, stream_id, data))
+                                print(f"[Stream {stream_id}] (seq {seq}) DELAYED: {data}")
+                            else:
+                                pending_messages.append((seq, stream_id, data))
+                                print(f"[Stream {stream_id}] (seq {seq}) QUEUED: {data}")
 
                             pending_messages.sort(key=lambda x: x[0])
                             while pending_messages and pending_messages[0][0] == next_to_deliver:
