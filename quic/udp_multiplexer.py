@@ -46,9 +46,10 @@ def main():
     tun = TunDevice()
 
     print("\nListening for UDP on port 9000...")
-    print("Configure: sudo ifconfig utun<X> 10.0.0.1 10.0.0.1 netmask 255.255.255.0 up")
+    print("Configure: sudo ifconfig utun<X> 192.168.100.1 192.168.100.2 netmask 255.255.255.0 up")
     print("Packet format: [type 1B][stream 1B][seq 2B][data...]")
-    print("  DATA=0x01, ACK=0x02\n")
+    print("  DATA=0x01, ACK=0x02")
+    input("\nPress Enter after configuring interface...")
 
     while True:
         packet_bytes = tun.read()
