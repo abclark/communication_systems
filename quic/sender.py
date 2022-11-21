@@ -1,30 +1,66 @@
 import socket
 import time
+import crypto
 
 DEST_IP = '192.168.100.100'
 UDP_PORT = 9000
 
 PACKET_DATA = 0x01
 PACKET_ACK = 0x02
+PACKET_INIT = 0x03
+PACKET_ACCEPT = 0x04
 
 pending_acks = {}
+aes_key = None
+
+
+def do_handshake(sock):
+    my_private = crypto.generate_private_key()
+    my_public = crypto.compute_public_key(my_private)
+
+    init_packet = bytes([PACKET_INIT]) + my_public.to_bytes(256, 'big')
+    sock.sendto(init_packet, (DEST_IP, UDP_PORT))
+    print("[Handshake] INIT sent (DH public key)")
+
+    sock.setblocking(True)
+    response, addr = sock.recvfrom(1024)
+    sock.setblocking(False)
+
+    if response[0] != PACKET_ACCEPT:
+        raise Exception("Expected ACCEPT packet")
+
+    their_public = int.from_bytes(response[1:257], 'big')
+    print("[Handshake] ACCEPT received (server DH public key)")
+
+    shared_secret = crypto.compute_shared_secret(their_public, my_private)
+    key = crypto.derive_aes_key(shared_secret)
+    print("[Handshake] Shared secret computed, AES key derived")
+
+    return key
 
 
 def send_data(sock, stream_id, seq, data):
-    payload = bytes([PACKET_DATA, stream_id]) + seq.to_bytes(2, 'big') + data.encode('utf-8')
+    plaintext = data.encode('utf-8')
+    encrypted = crypto.encrypt(aes_key, plaintext)
+    payload = bytes([PACKET_DATA, stream_id]) + seq.to_bytes(2, 'big') + encrypted
     sock.sendto(payload, (DEST_IP, UDP_PORT))
     pending_acks[(stream_id, seq)] = (time.time(), data)
-    print(f"[Stream {stream_id}] (seq {seq}) SENT: {data}")
+    print(f"[Stream {stream_id}] (seq {seq}) SENT (encrypted): {data}")
 
 
 def main():
+    global aes_key
+
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.setblocking(False)
 
     print("\nSender starting...")
     print("Make sure receiver is running first.")
     print(f"Sending to {DEST_IP}:{UDP_PORT}\n")
 
+    aes_key = do_handshake(sock)
+    print()
+
+    sock.setblocking(False)
     send_data(sock, stream_id=1, seq=1, data="hello")
     send_data(sock, stream_id=1, seq=2, data="world")
 

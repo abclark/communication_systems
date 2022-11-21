@@ -4,15 +4,19 @@ sys.path.insert(0, '../tcp_ip_stack')
 from stack import TunDevice
 from packet_headers import IPHeader, UDPHeader
 import protocols
+import crypto
 
 UDP_PORT = 9000
 
 PACKET_DATA = 0x01
 PACKET_ACK = 0x02
+PACKET_INIT = 0x03
+PACKET_ACCEPT = 0x04
 
 stream_next_deliver = {1: 1, 2: 1, 3: 1}
 stream_pending = {1: [], 2: [], 3: []}
 delayed_messages = []
+aes_key = None
 
 
 def send_udp(tun, src_ip, src_port, dest_ip, dest_port, payload):
@@ -60,20 +64,41 @@ def main():
                 udp_header = UDPHeader.from_bytes(udp_bytes)
 
                 if udp_header.dest_port == UDP_PORT:
+                    global aes_key
                     payload = udp_header.payload
-                    if len(payload) < 4:
+                    if len(payload) < 1:
                         continue
 
                     packet_type = payload[0]
-                    stream_id = payload[1]
-                    seq = int.from_bytes(payload[2:4], 'big')
 
-                    if stream_id not in stream_next_deliver:
-                        continue
+                    if packet_type == PACKET_INIT:
+                        their_public = int.from_bytes(payload[1:257], 'big')
+                        print("[Handshake] INIT received (client DH public key)")
 
-                    if packet_type == PACKET_DATA:
-                        data = payload[4:].decode('utf-8', errors='replace').strip()
-                        print(f"[Stream {stream_id}] (seq {seq}) DATA: {data}")
+                        my_private = crypto.generate_private_key()
+                        my_public = crypto.compute_public_key(my_private)
+
+                        shared_secret = crypto.compute_shared_secret(their_public, my_private)
+                        aes_key = crypto.derive_aes_key(shared_secret)
+                        print("[Handshake] Shared secret computed, AES key derived")
+
+                        accept_payload = bytes([PACKET_ACCEPT]) + my_public.to_bytes(256, 'big')
+                        send_udp(tun, ip_header.dest_ip, UDP_PORT, ip_header.src_ip, udp_header.src_port, accept_payload)
+                        print("[Handshake] ACCEPT sent (server DH public key)\n")
+
+                    elif packet_type == PACKET_DATA:
+                        if len(payload) < 4:
+                            continue
+                        stream_id = payload[1]
+                        seq = int.from_bytes(payload[2:4], 'big')
+
+                        if stream_id not in stream_next_deliver:
+                            continue
+
+                        encrypted = payload[4:]
+                        decrypted = crypto.decrypt(aes_key, encrypted)
+                        data = decrypted.decode('utf-8').strip()
+                        print(f"[Stream {stream_id}] (seq {seq}) DATA (decrypted): {data}")
 
                         ack_payload = bytes([PACKET_ACK, stream_id]) + seq.to_bytes(2, 'big')
                         send_udp(tun, ip_header.dest_ip, UDP_PORT, ip_header.src_ip, udp_header.src_port, ack_payload)
@@ -88,6 +113,8 @@ def main():
                             stream_next_deliver[stream_id] += 1
 
                     elif packet_type == PACKET_ACK:
+                        stream_id = payload[1]
+                        seq = int.from_bytes(payload[2:4], 'big')
                         print(f"[Stream {stream_id}] (seq {seq}) ACK received")
 
 
