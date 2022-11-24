@@ -1,3 +1,4 @@
+import os
 import socket
 import time
 import crypto
@@ -12,15 +13,16 @@ PACKET_ACCEPT = 0x04
 
 pending_acks = {}
 aes_key = None
+conn_id = os.urandom(8)  # Random 8-byte Connection ID
 
 
 def do_handshake(sock):
     my_private = crypto.generate_private_key()
     my_public = crypto.compute_public_key(my_private)
 
-    init_packet = bytes([PACKET_INIT]) + my_public.to_bytes(256, 'big')
+    init_packet = bytes([PACKET_INIT]) + conn_id + my_public.to_bytes(256, 'big')
     sock.sendto(init_packet, (DEST_IP, UDP_PORT))
-    print("[Handshake] INIT sent (DH public key)")
+    print(f"[Handshake] INIT sent (conn_id={conn_id.hex()[:8]}...)")
 
     sock.setblocking(True)
     response, addr = sock.recvfrom(1024)
