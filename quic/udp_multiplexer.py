@@ -16,7 +16,7 @@ PACKET_ACCEPT = 0x04
 stream_next_deliver = {1: 1, 2: 1, 3: 1}
 stream_pending = {1: [], 2: [], 3: []}
 delayed_messages = []
-aes_key = None
+connections = {}  # conn_id (bytes) -> {'aes_key': ..., 'last_addr': ...}
 
 
 def send_udp(tun, src_ip, src_port, dest_ip, dest_port, payload):
@@ -64,7 +64,6 @@ def main():
                 udp_header = UDPHeader.from_bytes(udp_bytes)
 
                 if udp_header.dest_port == UDP_PORT:
-                    global aes_key
                     payload = udp_header.payload
                     if len(payload) < 1:
                         continue
@@ -72,19 +71,26 @@ def main():
                     packet_type = payload[0]
 
                     if packet_type == PACKET_INIT:
-                        their_public = int.from_bytes(payload[1:257], 'big')
-                        print("[Handshake] INIT received (client DH public key)")
+                        # [type 1B][conn_id 8B][DH public 256B]
+                        conn_id = payload[1:9]
+                        their_public = int.from_bytes(payload[9:265], 'big')
+                        print(f"[{conn_id.hex()[:8]}] INIT received")
 
                         my_private = crypto.generate_private_key()
                         my_public = crypto.compute_public_key(my_private)
 
                         shared_secret = crypto.compute_shared_secret(their_public, my_private)
                         aes_key = crypto.derive_aes_key(shared_secret)
-                        print("[Handshake] Shared secret computed, AES key derived")
 
-                        accept_payload = bytes([PACKET_ACCEPT]) + my_public.to_bytes(256, 'big')
+                        connections[conn_id] = {
+                            'aes_key': aes_key,
+                            'last_addr': (ip_header.src_ip, udp_header.src_port)
+                        }
+                        print(f"[{conn_id.hex()[:8]}] Connection stored (key derived)")
+
+                        accept_payload = bytes([PACKET_ACCEPT]) + conn_id + my_public.to_bytes(256, 'big')
                         send_udp(tun, ip_header.dest_ip, UDP_PORT, ip_header.src_ip, udp_header.src_port, accept_payload)
-                        print("[Handshake] ACCEPT sent (server DH public key)\n")
+                        print(f"[{conn_id.hex()[:8]}] ACCEPT sent\n")
 
                     elif packet_type == PACKET_DATA:
                         if len(payload) < 4:
