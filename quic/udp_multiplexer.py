@@ -93,22 +93,31 @@ def main():
                         print(f"[{conn_id.hex()[:8]}] ACCEPT sent\n")
 
                     elif packet_type == PACKET_DATA:
-                        if len(payload) < 4:
+                        # [type 1B][conn_id 8B][stream_id 1B][seq 2B][encrypted...]
+                        if len(payload) < 12:
                             continue
-                        stream_id = payload[1]
-                        seq = int.from_bytes(payload[2:4], 'big')
+                        conn_id = payload[1:9]
+                        stream_id = payload[9]
+                        seq = int.from_bytes(payload[10:12], 'big')
+
+                        if conn_id not in connections:
+                            print(f"[{conn_id.hex()[:8]}] Unknown connection, dropping")
+                            continue
+
+                        conn = connections[conn_id]
+                        conn['last_addr'] = (ip_header.src_ip, udp_header.src_port)
 
                         if stream_id not in stream_next_deliver:
                             continue
 
-                        encrypted = payload[4:]
-                        decrypted = crypto.decrypt(aes_key, encrypted)
+                        encrypted = payload[12:]
+                        decrypted = crypto.decrypt(conn['aes_key'], encrypted)
                         data = decrypted.decode('utf-8').strip()
-                        print(f"[Stream {stream_id}] (seq {seq}) DATA (decrypted): {data}")
+                        print(f"[{conn_id.hex()[:8]}] [Stream {stream_id}] (seq {seq}) DATA: {data}")
 
-                        ack_payload = bytes([PACKET_ACK, stream_id]) + seq.to_bytes(2, 'big')
+                        ack_payload = bytes([PACKET_ACK]) + conn_id + bytes([stream_id]) + seq.to_bytes(2, 'big')
                         send_udp(tun, ip_header.dest_ip, UDP_PORT, ip_header.src_ip, udp_header.src_port, ack_payload)
-                        print(f"[Stream {stream_id}] (seq {seq}) ACK sent")
+                        print(f"[{conn_id.hex()[:8]}] [Stream {stream_id}] (seq {seq}) ACK sent")
 
                         stream_pending[stream_id].append((seq, data))
 
