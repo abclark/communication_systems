@@ -52,29 +52,12 @@ def send_data(sock, stream_id, seq, data):
     print(f"[{conn_id.hex()[:8]}] [Stream {stream_id}] (seq {seq}) SENT: {data}")
 
 
-def main():
-    global aes_key
-
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-
-    print("\nSender starting...")
-    print("Make sure receiver is running first.")
-    print(f"Sending to {DEST_IP}:{UDP_PORT}\n")
-
-    aes_key = do_handshake(sock)
-    print()
-
-    sock.setblocking(False)
-    send_data(sock, stream_id=1, seq=1, data="hello")
-    send_data(sock, stream_id=1, seq=2, data="world")
-
-    timeout_seconds = 2.0
-
+def wait_for_acks(sock, timeout_seconds=2.0):
+    """Wait until all pending ACKs received."""
     while pending_acks:
         try:
             payload, addr = sock.recvfrom(1024)
             if len(payload) >= 12 and payload[0] == PACKET_ACK:
-                # [type 1B][conn_id 8B][stream_id 1B][seq 2B]
                 recv_conn_id = payload[1:9]
                 stream_id = payload[9]
                 seq = int.from_bytes(payload[10:12], 'big')
@@ -93,7 +76,39 @@ def main():
                 print(f"[Stream {stream_id}] (seq {seq}) TIMEOUT, retransmitting...")
                 send_data(sock, stream_id, seq, data)
 
-    print("\nAll packets ACKed!")
+
+def main():
+    global aes_key
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+    print("\nSender starting...")
+    print("Make sure receiver is running first.")
+    print(f"Sending to {DEST_IP}:{UDP_PORT}\n")
+
+    aes_key = do_handshake(sock)
+    print()
+
+    # Phase 1: Send from original socket
+    sock.setblocking(False)
+    print("--- Phase 1: Sending from original port ---")
+    send_data(sock, stream_id=1, seq=1, data="hello")
+    send_data(sock, stream_id=1, seq=2, data="world")
+    wait_for_acks(sock)
+
+    # Phase 2: Simulate migration - new socket, different port
+    print("\n--- Phase 2: Simulating migration (new port) ---")
+    sock.close()
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setblocking(False)
+    print("[MIGRATION] Closed old socket, opened new one")
+
+    # Send from new port, same connection ID
+    send_data(sock, stream_id=1, seq=3, data="still")
+    send_data(sock, stream_id=1, seq=4, data="connected!")
+    wait_for_acks(sock)
+
+    print("\n=== Migration successful! Connection survived port change. ===")
 
 
 if __name__ == '__main__':
