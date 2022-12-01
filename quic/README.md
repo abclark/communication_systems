@@ -279,11 +279,144 @@ Google's QUIC worked but was proprietary. IETF standardized it as RFC 9000 (2021
 
 ## Project Status
 
-- [ ] Step 1: TCP Multiplexing (feel head-of-line blocking)
-- [ ] Step 2: UDP Multiplexing (solve head-of-line blocking)
-- [ ] Step 3: Reliability Layer (ACKs, retransmission)
-- [ ] Step 4: Merged Handshake (reduce latency)
-- [ ] Step 5: Connection IDs (connection migration)
-- [ ] Step 6: Encryption (prevent ossification)
+- [x] Step 1: TCP Multiplexing (feel head-of-line blocking)
+- [x] Step 2: UDP Multiplexing (solve head-of-line blocking)
+- [x] Step 3: Reliability Layer (ACKs, retransmission)
+- [x] Step 4: Merged Handshake (reduce latency) — combined with Step 6
+- [x] Step 5: Connection IDs (connection migration)
+- [x] Step 6: Encryption (DH key exchange + AES-GCM)
 - [ ] Step 7: QUIC Wire Format (RFC 9000)
 - [ ] Step 8: Integration with custom stack
+
+---
+
+## How Diffie-Hellman Key Exchange Works
+
+DH solves: "How do two parties agree on a secret key without anyone eavesdropping being able to figure it out?"
+
+### The Setup
+
+Two public parameters everyone knows:
+- `p` = large prime (2048 bits in our code)
+- `g` = generator (usually 2)
+
+### The Exchange
+
+```
+Client picks secret: a (random integer)
+Server picks secret: b (random integer)
+
+Client computes: A = g^a mod p  → sends A to server
+Server computes: B = g^b mod p  → sends B to client
+```
+
+### The Magic
+
+```
+Client computes: B^a mod p = (g^b)^a mod p = g^(ab) mod p
+Server computes: A^b mod p = (g^a)^b mod p = g^(ab) mod p
+                                              ↑
+                                         SAME VALUE!
+```
+
+Both arrive at `g^(ab) mod p` — the shared secret. An eavesdropper sees `A` and `B` but can't compute `g^(ab)` without knowing `a` or `b`.
+
+### Paint Analogy
+
+```
+Public: yellow paint (g, p)
+
+Client: mixes in secret red (a)    → sends orange
+Server: mixes in secret blue (b)   → sends green
+
+Client: takes green, adds red      → brown
+Server: takes orange, adds blue    → same brown!
+
+Eavesdropper sees: yellow, orange, green
+Can't unmix to find red or blue. Can't make brown.
+```
+
+### Why It's Secure
+
+Finding `a` from `g^a mod p` is the **discrete logarithm problem** — computationally infeasible for large primes. More possibilities than atoms in the universe.
+
+### From Shared Secret to Encryption
+
+```
+DH exchange → shared secret (2048-bit number)
+     ↓
+SHA256 hash → AES key (256 bits)
+     ↓
+AES-GCM → encrypt/decrypt actual data
+```
+
+DH establishes the key. AES does the fast symmetric encryption.
+
+---
+
+## Implementation Progress & Learnings
+
+### What We Built
+
+| Component | File | What It Does |
+|-----------|------|--------------|
+| TCP Multiplexer | `multiplexer.py` | Demonstrates head-of-line blocking |
+| UDP Multiplexer | `udp_multiplexer.py` | Server with per-stream delivery, no blocking |
+| Sender | `sender.py` | Client with retransmission and migration test |
+| Crypto | `crypto.py` | DH key exchange + AES-GCM encryption |
+
+### Key Learnings
+
+**Why UDP over TCP?**
+TCP is in the kernel. You can't change how it identifies connections (4-tuple) or handles loss (ordered delivery). UDP just delivers bytes — you build whatever semantics you want on top.
+
+**Connection ID vs IP/Port:**
+TCP: connection = (src_ip, src_port, dst_ip, dst_port). IP changes = dead connection.
+QUIC: connection = random ID in packet payload. IP can change freely.
+
+**The Trust Problem (CAs):**
+DH gives secrecy but not authentication. You don't know *who* you're talking to. Real QUIC uses TLS certificates signed by Certificate Authorities. The whole internet trusts ~100 CAs not to misbehave. Certificate Transparency logs provide accountability.
+
+**Why Encrypt Everything?**
+Middleboxes (firewalls, NATs, corporate proxies) inspect and modify TCP packets. They break new features by enforcing old assumptions. If everything is encrypted, they can't interfere. Only the Connection ID is visible.
+
+**0-RTT Tradeoff:**
+Caching crypto params allows zero round-trip connections for returning clients. But 0-RTT data can be replayed by attackers. Only safe for idempotent operations (GET, not POST).
+
+### Packet Format Evolution
+
+```
+Step 1 (TCP): Kernel handles everything
+
+Step 2 (UDP): [stream_id 1B][data...]
+
+Step 3 (+ reliability): [stream_id 1B][seq 2B][data...]
+
+Step 4-6 (+ crypto): [type 1B][DH public 256B]  (handshake)
+                     [type 1B][stream_id 1B][seq 2B][encrypted...]  (data)
+
+Step 5 (+ conn ID): [type 1B][conn_id 8B][stream_id 1B][seq 2B][encrypted...]
+```
+
+Each addition solved a specific problem we felt firsthand.
+
+---
+
+## Files
+
+- **multiplexer.py** — TCP multiplexer demonstrating head-of-line blocking.
+  Three TCP connections (ports 9001-9003) mapped to streams 1-3, sharing a
+  global sequence. Stream 2 is artificially delayed. Shows how one slow
+  stream blocks all others. This is "the problem" that QUIC solves.
+
+- **udp_multiplexer.py** — UDP server with Connection ID support. Looks up
+  connections by ID (not IP/port), enabling connection migration. Handles
+  INIT/ACCEPT handshake, encrypts/decrypts data with per-connection AES keys.
+
+- **sender.py** — UDP client that performs DH handshake, sends encrypted data,
+  handles ACKs and retransmission. Includes migration test (closes socket,
+  opens new one, continues sending with same Connection ID).
+
+- **crypto.py** — Diffie-Hellman key exchange (2048-bit MODP group from RFC 3526)
+  and AES-GCM encryption. Functions: generate_private_key, compute_public_key,
+  compute_shared_secret, derive_aes_key, encrypt, decrypt.
