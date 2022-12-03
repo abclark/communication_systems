@@ -5,6 +5,7 @@ import crypto
 
 DEST_IP = '192.168.100.100'
 UDP_PORT = 9000
+SERVER_CACHE_FILE = 'server_pubkey.bin'
 
 PACKET_DATA = 0x01
 PACKET_ACK = 0x02
@@ -35,6 +36,11 @@ def do_handshake(sock):
     recv_conn_id = response[1:9]
     their_public = int.from_bytes(response[9:265], 'big')
     print(f"[{recv_conn_id.hex()[:8]}] ACCEPT received")
+
+    # Cache server's public key for future 0-RTT
+    with open(SERVER_CACHE_FILE, 'wb') as f:
+        f.write(their_public.to_bytes(256, 'big'))
+    print(f"[Cache] Saved server public key to {SERVER_CACHE_FILE}")
 
     shared_secret = crypto.compute_shared_secret(their_public, my_private)
     key = crypto.derive_aes_key(shared_secret)
