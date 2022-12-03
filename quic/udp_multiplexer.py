@@ -1,3 +1,4 @@
+import os
 import sys
 sys.path.insert(0, '../tcp_ip_stack')
 
@@ -7,6 +8,22 @@ import protocols
 import crypto
 
 UDP_PORT = 9000
+SERVER_KEY_FILE = 'server_key.bin'
+
+
+def load_or_generate_server_key():
+    """Load server's long-term DH private key, or generate if first run."""
+    if os.path.exists(SERVER_KEY_FILE):
+        with open(SERVER_KEY_FILE, 'rb') as f:
+            private = int.from_bytes(f.read(), 'big')
+            print(f"[Server] Loaded existing keypair from {SERVER_KEY_FILE}")
+            return private
+    else:
+        private = crypto.generate_private_key()
+        with open(SERVER_KEY_FILE, 'wb') as f:
+            f.write(private.to_bytes(32, 'big'))
+        print(f"[Server] Generated new keypair, saved to {SERVER_KEY_FILE}")
+        return private
 
 PACKET_DATA = 0x01
 PACKET_ACK = 0x02
@@ -47,6 +64,10 @@ def send_udp(tun, src_ip, src_port, dest_ip, dest_port, payload):
 
 
 def main():
+    # Load or generate server's long-term keypair
+    server_private = load_or_generate_server_key()
+    server_public = crypto.compute_public_key(server_private)
+
     tun = TunDevice()
 
     print("\nListening for UDP on port 9000...")
@@ -76,10 +97,8 @@ def main():
                         their_public = int.from_bytes(payload[9:265], 'big')
                         print(f"[{conn_id.hex()[:8]}] INIT received")
 
-                        my_private = crypto.generate_private_key()
-                        my_public = crypto.compute_public_key(my_private)
-
-                        shared_secret = crypto.compute_shared_secret(their_public, my_private)
+                        # Use server's long-term keypair (not random per connection)
+                        shared_secret = crypto.compute_shared_secret(their_public, server_private)
                         aes_key = crypto.derive_aes_key(shared_secret)
 
                         connections[conn_id] = {
@@ -88,7 +107,7 @@ def main():
                         }
                         print(f"[{conn_id.hex()[:8]}] Connection stored (key derived)")
 
-                        accept_payload = bytes([PACKET_ACCEPT]) + conn_id + my_public.to_bytes(256, 'big')
+                        accept_payload = bytes([PACKET_ACCEPT]) + conn_id + server_public.to_bytes(256, 'big')
                         send_udp(tun, ip_header.dest_ip, UDP_PORT, ip_header.src_ip, udp_header.src_port, accept_payload)
                         print(f"[{conn_id.hex()[:8]}] ACCEPT sent\n")
 
