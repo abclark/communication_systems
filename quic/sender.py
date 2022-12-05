@@ -11,10 +11,11 @@ PACKET_DATA = 0x01
 PACKET_ACK = 0x02
 PACKET_INIT = 0x03
 PACKET_ACCEPT = 0x04
+PACKET_0RTT = 0x05
 
 pending_acks = {}
 aes_key = None
-conn_id = os.urandom(8)  # Random 8-byte Connection ID
+conn_id = os.urandom(8)
 
 
 def do_handshake(sock):
@@ -32,12 +33,10 @@ def do_handshake(sock):
     if response[0] != PACKET_ACCEPT:
         raise Exception("Expected ACCEPT packet")
 
-    # [type 1B][conn_id 8B][DH public 256B]
     recv_conn_id = response[1:9]
     their_public = int.from_bytes(response[9:265], 'big')
     print(f"[{recv_conn_id.hex()[:8]}] ACCEPT received")
 
-    # Cache server's public key for future 0-RTT
     with open(SERVER_CACHE_FILE, 'wb') as f:
         f.write(their_public.to_bytes(256, 'big'))
     print(f"[Cache] Saved server public key to {SERVER_CACHE_FILE}")
@@ -47,6 +46,31 @@ def do_handshake(sock):
     print("[Handshake] Shared secret computed, AES key derived")
 
     return key
+
+
+def do_0rtt(sock):
+    with open(SERVER_CACHE_FILE, 'rb') as f:
+        server_public = int.from_bytes(f.read(), 'big')
+    print(f"[0-RTT] Loaded cached server public key")
+
+    my_private = crypto.generate_private_key()
+    my_public = crypto.compute_public_key(my_private)
+
+    shared_secret = crypto.compute_shared_secret(server_public, my_private)
+    key = crypto.derive_aes_key(shared_secret)
+    print(f"[0-RTT] Derived key from cached server public")
+
+    return key, my_public
+
+
+def send_0rtt_data(sock, my_public, stream_id, seq, data):
+    plaintext = data.encode('utf-8')
+    encrypted = crypto.encrypt(aes_key, plaintext)
+    payload = (bytes([PACKET_0RTT]) + conn_id + my_public.to_bytes(256, 'big') +
+               bytes([stream_id]) + seq.to_bytes(2, 'big') + encrypted)
+    sock.sendto(payload, (DEST_IP, UDP_PORT))
+    pending_acks[(stream_id, seq)] = (time.time(), data)
+    print(f"[{conn_id.hex()[:8]}] [0-RTT] [Stream {stream_id}] (seq {seq}) SENT: {data}")
 
 
 def send_data(sock, stream_id, seq, data):
@@ -92,24 +116,34 @@ def main():
     print("Make sure receiver is running first.")
     print(f"Sending to {DEST_IP}:{UDP_PORT}\n")
 
-    aes_key = do_handshake(sock)
-    print()
+    if os.path.exists(SERVER_CACHE_FILE):
+        print("=== 0-RTT MODE (cached key found) ===\n")
+        aes_key, my_public = do_0rtt(sock)
 
-    # Phase 1: Send from original socket
+        sock.setblocking(False)
+        send_0rtt_data(sock, my_public, stream_id=1, seq=1, data="hello")
+        send_0rtt_data(sock, my_public, stream_id=1, seq=2, data="world")
+        wait_for_acks(sock)
+
+        print("\n=== 0-RTT successful! No handshake needed. ===")
+        return
+    else:
+        print("=== FULL HANDSHAKE (no cache) ===\n")
+        aes_key = do_handshake(sock)
+        print()
+
     sock.setblocking(False)
     print("--- Phase 1: Sending from original port ---")
     send_data(sock, stream_id=1, seq=1, data="hello")
     send_data(sock, stream_id=1, seq=2, data="world")
     wait_for_acks(sock)
 
-    # Phase 2: Simulate migration - new socket, different port
     print("\n--- Phase 2: Simulating migration (new port) ---")
     sock.close()
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setblocking(False)
     print("[MIGRATION] Closed old socket, opened new one")
 
-    # Send from new port, same connection ID
     send_data(sock, stream_id=1, seq=3, data="still")
     send_data(sock, stream_id=1, seq=4, data="connected!")
     wait_for_acks(sock)

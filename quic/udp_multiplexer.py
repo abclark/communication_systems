@@ -33,7 +33,7 @@ PACKET_ACCEPT = 0x04
 stream_next_deliver = {1: 1, 2: 1, 3: 1}
 stream_pending = {1: [], 2: [], 3: []}
 delayed_messages = []
-connections = {}  # conn_id (bytes) -> {'aes_key': ..., 'last_addr': ...}
+connections = {}
 
 
 def send_udp(tun, src_ip, src_port, dest_ip, dest_port, payload):
@@ -64,7 +64,6 @@ def send_udp(tun, src_ip, src_port, dest_ip, dest_port, payload):
 
 
 def main():
-    # Load or generate server's long-term keypair
     server_private = load_or_generate_server_key()
     server_public = crypto.compute_public_key(server_private)
 
@@ -92,12 +91,10 @@ def main():
                     packet_type = payload[0]
 
                     if packet_type == PACKET_INIT:
-                        # [type 1B][conn_id 8B][DH public 256B]
                         conn_id = payload[1:9]
                         their_public = int.from_bytes(payload[9:265], 'big')
                         print(f"[{conn_id.hex()[:8]}] INIT received")
 
-                        # Use server's long-term keypair (not random per connection)
                         shared_secret = crypto.compute_shared_secret(their_public, server_private)
                         aes_key = crypto.derive_aes_key(shared_secret)
 
@@ -112,7 +109,6 @@ def main():
                         print(f"[{conn_id.hex()[:8]}] ACCEPT sent\n")
 
                     elif packet_type == PACKET_DATA:
-                        # [type 1B][conn_id 8B][stream_id 1B][seq 2B][encrypted...]
                         if len(payload) < 12:
                             continue
                         conn_id = payload[1:9]
