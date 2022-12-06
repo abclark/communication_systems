@@ -29,6 +29,7 @@ PACKET_DATA = 0x01
 PACKET_ACK = 0x02
 PACKET_INIT = 0x03
 PACKET_ACCEPT = 0x04
+PACKET_0RTT = 0x05
 
 stream_next_deliver = {1: 1, 2: 1, 3: 1}
 stream_pending = {1: [], 2: [], 3: []}
@@ -146,6 +147,9 @@ def main():
                         stream_id = payload[1]
                         seq = int.from_bytes(payload[2:4], 'big')
                         print(f"[Stream {stream_id}] (seq {seq}) ACK received")
+
+                    elif packet_type == PACKET_0RTT:
+                        print(f"[0-RTT] Received 0-RTT packet ({len(payload)} bytes)")
 
 
 if __name__ == '__main__':
