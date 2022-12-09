@@ -149,7 +149,14 @@ def main():
                         print(f"[Stream {stream_id}] (seq {seq}) ACK received")
 
                     elif packet_type == PACKET_0RTT:
-                        print(f"[0-RTT] Received 0-RTT packet ({len(payload)} bytes)")
+                        if len(payload) < 268:
+                            continue
+                        conn_id = payload[1:9]
+                        their_public = int.from_bytes(payload[9:265], 'big')
+                        stream_id = payload[265]
+                        seq = int.from_bytes(payload[266:268], 'big')
+                        encrypted = payload[268:]
+                        print(f"[{conn_id.hex()[:8]}] [0-RTT] stream={stream_id} seq={seq} encrypted={len(encrypted)}B")
 
 
 if __name__ == '__main__':
