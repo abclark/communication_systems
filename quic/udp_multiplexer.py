@@ -156,7 +156,15 @@ def main():
                         stream_id = payload[265]
                         seq = int.from_bytes(payload[266:268], 'big')
                         encrypted = payload[268:]
-                        print(f"[{conn_id.hex()[:8]}] [0-RTT] stream={stream_id} seq={seq} encrypted={len(encrypted)}B")
+
+                        if conn_id not in connections:
+                            shared_secret = crypto.compute_shared_secret(their_public, server_private)
+                            aes_key = crypto.derive_aes_key(shared_secret)
+                            connections[conn_id] = {
+                                'aes_key': aes_key,
+                                'last_addr': (ip_header.src_ip, udp_header.src_port)
+                            }
+                            print(f"[{conn_id.hex()[:8]}] [0-RTT] Connection created (key derived)")
 
 
 if __name__ == '__main__':
