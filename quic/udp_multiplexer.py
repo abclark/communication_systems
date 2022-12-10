@@ -166,6 +166,15 @@ def main():
                             }
                             print(f"[{conn_id.hex()[:8]}] [0-RTT] Connection created (key derived)")
 
+                        conn = connections[conn_id]
+                        decrypted = crypto.decrypt(conn['aes_key'], encrypted)
+                        data = decrypted.decode('utf-8').strip()
+                        print(f"[{conn_id.hex()[:8]}] [0-RTT] [Stream {stream_id}] (seq {seq}) DATA: {data}")
+
+                        ack_payload = bytes([PACKET_ACK]) + conn_id + bytes([stream_id]) + seq.to_bytes(2, 'big')
+                        send_udp(tun, ip_header.dest_ip, UDP_PORT, ip_header.src_ip, udp_header.src_port, ack_payload)
+                        print(f"[{conn_id.hex()[:8]}] [0-RTT] [Stream {stream_id}] (seq {seq}) ACK sent")
+
 
 if __name__ == '__main__':
     try:
