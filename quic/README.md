@@ -282,7 +282,7 @@ Google's QUIC worked but was proprietary. IETF standardized it as RFC 9000 (2021
 - [x] Step 1: TCP Multiplexing (feel head-of-line blocking)
 - [x] Step 2: UDP Multiplexing (solve head-of-line blocking)
 - [x] Step 3: Reliability Layer (ACKs, retransmission)
-- [x] Step 4: Merged Handshake (reduce latency) — combined with Step 6
+- [x] Step 4: Merged Handshake + 0-RTT (reduce latency)
 - [x] Step 5: Connection IDs (connection migration)
 - [x] Step 6: Encryption (DH key exchange + AES-GCM)
 - [ ] Step 7: QUIC Wire Format (RFC 9000)
@@ -354,6 +354,131 @@ DH establishes the key. AES does the fast symmetric encryption.
 
 ---
 
+## How 0-RTT Works
+
+### The Problem (2013)
+
+QUIC has a 1-RTT handshake—already better than TCP+TLS (3 RTT). But Google measures everything.
+
+The data showed: users make the same connections repeatedly. Open Gmail → close → open again. YouTube video → another video. Same servers, over and over.
+
+The question: **If I talked to this server 10 seconds ago, why negotiate keys again?**
+
+```
+Every new connection pays the handshake tax:
+
+User clicks link
+    |
+    |--- INIT --------→ Server
+    |←-- ACCEPT -------|
+    |                     ← 100ms (if server is far away)
+    |--- DATA ---------→
+    |←-- Response -----|
+    |                     ← 100ms more
+
+Total: 200ms before user sees anything
+```
+
+On mobile networks with 150ms RTT, users wait 300ms+ just for handshakes.
+
+### The Solution
+
+**First connection:** Full handshake. Client caches server's public key (g^b).
+
+**Second connection:** Client already knows g^b. Send data immediately.
+
+```
+First visit:
+  Client ←→ Server: INIT/ACCEPT (derive key K)
+  Client saves: server's public key (g^b)
+
+Second visit (0-RTT):
+  Client → Server: DATA encrypted with new key
+  Server → Client: Response
+
+Total: 100ms. Half the latency.
+```
+
+### How It Works with DH
+
+First connection:
+```
+Client: picks random a
+Server: has long-term b
+
+Client sends: g^a mod p
+Server sends: g^b mod p
+
+Both compute: g^(ab) mod p → shared secret → AES key
+Client caches: g^b (server's public key)
+```
+
+Second connection (0-RTT):
+```
+Client: loads cached g^b
+Client: picks NEW random a'
+Client: computes (g^b)^a' = g^(a'b) → new shared secret → AES key
+Client: encrypts data, sends g^a' + encrypted data in ONE packet
+
+Server: receives g^a'
+Server: computes (g^a')^b = g^(a'b) → same shared secret → same AES key
+Server: decrypts immediately!
+```
+
+The server's keypair being **long-term** (not random per connection) is what makes this possible.
+
+### The Replay Attack Problem
+
+0-RTT has a vulnerability. An attacker doesn't need to break crypto—they just record and replay:
+
+```
+You (0-RTT): [g^a' + encrypted "transfer $100"]
+    ↓
+Attacker: *records this packet*
+    ↓
+Attacker: *replays it 50 times*
+    ↓
+Server: processes each one as valid!
+```
+
+The server can't tell replays from new requests—the crypto checks out every time.
+
+**Why doesn't this happen with 1-RTT handshake?**
+
+```
+Connection 1: a=5, b=7 → key = g^35
+Connection 2: a=9, b=7 → key = g^63 (different!)
+
+Replay packet from Connection 1?
+→ Wrong key, decryption fails, rejected
+```
+
+With 0-RTT, if you replay the same packet, the key derivation produces the same result.
+
+### What's Safe for 0-RTT?
+
+Only **idempotent operations**—requests that have the same effect if executed multiple times:
+
+| Request | Safe? | Why |
+|---------|-------|-----|
+| `GET /homepage` | ✅ | Same result every time |
+| `GET /search?q=cats` | ✅ | Same result every time |
+| `POST /transfer` | ❌ | Side effects—money moves |
+| `POST /login` | ❌ | Could create sessions |
+
+The application layer decides what's safe to send as 0-RTT. QUIC just provides the mechanism.
+
+### Real-World Protections
+
+Production QUIC adds:
+1. **Single-use tickets** — server issues a "session ticket" that can only be used once
+2. **Time limits** — 0-RTT only valid for X seconds after last connection
+3. **Strike registers** — server remembers recent 0-RTT packets to detect replays
+
+We skip these for learning—the basic caching demonstrates the concept.
+
+---
+
 ## Implementation Progress & Learnings
 
 ### What We Built
@@ -396,6 +521,9 @@ Step 4-6 (+ crypto): [type 1B][DH public 256B]  (handshake)
                      [type 1B][stream_id 1B][seq 2B][encrypted...]  (data)
 
 Step 5 (+ conn ID): [type 1B][conn_id 8B][stream_id 1B][seq 2B][encrypted...]
+
+Step 4b (+ 0-RTT): [type 1B][conn_id 8B][client_public 256B][stream_id 1B][seq 2B][encrypted...]
+                   ↑ Handshake + data in one packet!
 ```
 
 Each addition solved a specific problem we felt firsthand.
@@ -411,11 +539,13 @@ Each addition solved a specific problem we felt firsthand.
 
 - **udp_multiplexer.py** — UDP server with Connection ID support. Looks up
   connections by ID (not IP/port), enabling connection migration. Handles
-  INIT/ACCEPT handshake, encrypts/decrypts data with per-connection AES keys.
+  INIT/ACCEPT handshake and 0-RTT packets. Uses persistent DH keypair for
+  0-RTT support. Encrypts/decrypts data with per-connection AES keys.
 
 - **sender.py** — UDP client that performs DH handshake, sends encrypted data,
-  handles ACKs and retransmission. Includes migration test (closes socket,
-  opens new one, continues sending with same Connection ID).
+  handles ACKs and retransmission. Caches server's public key for 0-RTT on
+  repeat connections. Includes migration test (closes socket, opens new one,
+  continues sending with same Connection ID).
 
 - **crypto.py** — Diffie-Hellman key exchange (2048-bit MODP group from RFC 3526)
   and AES-GCM encryption. Functions: generate_private_key, compute_public_key,
