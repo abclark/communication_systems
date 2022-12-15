@@ -2,6 +2,7 @@ import os
 import socket
 import time
 import crypto
+import varint
 
 DEST_IP = '192.168.100.100'
 UDP_PORT = 9000
@@ -67,7 +68,7 @@ def send_0rtt_data(sock, my_public, stream_id, seq, data):
     plaintext = data.encode('utf-8')
     encrypted = crypto.encrypt(aes_key, plaintext)
     payload = (bytes([PACKET_0RTT]) + conn_id + my_public.to_bytes(256, 'big') +
-               bytes([stream_id]) + seq.to_bytes(2, 'big') + encrypted)
+               varint.encode(stream_id) + varint.encode(seq) + encrypted)
     sock.sendto(payload, (DEST_IP, UDP_PORT))
     pending_acks[(stream_id, seq)] = (time.time(), data)
     print(f"[{conn_id.hex()[:8]}] [0-RTT] [Stream {stream_id}] (seq {seq}) SENT: {data}")
@@ -76,7 +77,7 @@ def send_0rtt_data(sock, my_public, stream_id, seq, data):
 def send_data(sock, stream_id, seq, data):
     plaintext = data.encode('utf-8')
     encrypted = crypto.encrypt(aes_key, plaintext)
-    payload = bytes([PACKET_DATA]) + conn_id + bytes([stream_id]) + seq.to_bytes(2, 'big') + encrypted
+    payload = bytes([PACKET_DATA]) + conn_id + varint.encode(stream_id) + varint.encode(seq) + encrypted
     sock.sendto(payload, (DEST_IP, UDP_PORT))
     pending_acks[(stream_id, seq)] = (time.time(), data)
     print(f"[{conn_id.hex()[:8]}] [Stream {stream_id}] (seq {seq}) SENT: {data}")
@@ -87,10 +88,10 @@ def wait_for_acks(sock, timeout_seconds=2.0):
     while pending_acks:
         try:
             payload, addr = sock.recvfrom(1024)
-            if len(payload) >= 12 and payload[0] == PACKET_ACK:
+            if len(payload) >= 10 and payload[0] == PACKET_ACK:
                 recv_conn_id = payload[1:9]
-                stream_id = payload[9]
-                seq = int.from_bytes(payload[10:12], 'big')
+                stream_id, n1 = varint.decode(payload[9:])
+                seq, n2 = varint.decode(payload[9 + n1:])
 
                 key = (stream_id, seq)
                 if key in pending_acks:

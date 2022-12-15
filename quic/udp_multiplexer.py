@@ -6,6 +6,7 @@ from stack import TunDevice
 from packet_headers import IPHeader, UDPHeader
 import protocols
 import crypto
+import varint
 
 UDP_PORT = 9000
 SERVER_KEY_FILE = 'server_key.bin'
@@ -110,11 +111,11 @@ def main():
                         print(f"[{conn_id.hex()[:8]}] ACCEPT sent\n")
 
                     elif packet_type == PACKET_DATA:
-                        if len(payload) < 12:
+                        if len(payload) < 11:
                             continue
                         conn_id = payload[1:9]
-                        stream_id = payload[9]
-                        seq = int.from_bytes(payload[10:12], 'big')
+                        stream_id, n1 = varint.decode(payload[9:])
+                        seq, n2 = varint.decode(payload[9 + n1:])
 
                         if conn_id not in connections:
                             print(f"[{conn_id.hex()[:8]}] Unknown connection, dropping")
@@ -126,12 +127,12 @@ def main():
                         if stream_id not in stream_next_deliver:
                             continue
 
-                        encrypted = payload[12:]
+                        encrypted = payload[9 + n1 + n2:]
                         decrypted = crypto.decrypt(conn['aes_key'], encrypted)
                         data = decrypted.decode('utf-8').strip()
                         print(f"[{conn_id.hex()[:8]}] [Stream {stream_id}] (seq {seq}) DATA: {data}")
 
-                        ack_payload = bytes([PACKET_ACK]) + conn_id + bytes([stream_id]) + seq.to_bytes(2, 'big')
+                        ack_payload = bytes([PACKET_ACK]) + conn_id + varint.encode(stream_id) + varint.encode(seq)
                         send_udp(tun, ip_header.dest_ip, UDP_PORT, ip_header.src_ip, udp_header.src_port, ack_payload)
                         print(f"[{conn_id.hex()[:8]}] [Stream {stream_id}] (seq {seq}) ACK sent")
 
@@ -149,13 +150,13 @@ def main():
                         print(f"[Stream {stream_id}] (seq {seq}) ACK received")
 
                     elif packet_type == PACKET_0RTT:
-                        if len(payload) < 268:
+                        if len(payload) < 267:
                             continue
                         conn_id = payload[1:9]
                         their_public = int.from_bytes(payload[9:265], 'big')
-                        stream_id = payload[265]
-                        seq = int.from_bytes(payload[266:268], 'big')
-                        encrypted = payload[268:]
+                        stream_id, n1 = varint.decode(payload[265:])
+                        seq, n2 = varint.decode(payload[265 + n1:])
+                        encrypted = payload[265 + n1 + n2:]
 
                         if conn_id not in connections:
                             shared_secret = crypto.compute_shared_secret(their_public, server_private)
@@ -171,7 +172,7 @@ def main():
                         data = decrypted.decode('utf-8').strip()
                         print(f"[{conn_id.hex()[:8]}] [0-RTT] [Stream {stream_id}] (seq {seq}) DATA: {data}")
 
-                        ack_payload = bytes([PACKET_ACK]) + conn_id + bytes([stream_id]) + seq.to_bytes(2, 'big')
+                        ack_payload = bytes([PACKET_ACK]) + conn_id + varint.encode(stream_id) + varint.encode(seq)
                         send_udp(tun, ip_header.dest_ip, UDP_PORT, ip_header.src_ip, udp_header.src_port, ack_payload)
                         print(f"[{conn_id.hex()[:8]}] [0-RTT] [Stream {stream_id}] (seq {seq}) ACK sent")
 
