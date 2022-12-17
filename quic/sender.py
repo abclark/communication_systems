@@ -3,6 +3,7 @@ import socket
 import time
 import crypto
 import varint
+import frames
 
 DEST_IP = '192.168.100.100'
 UDP_PORT = 9000
@@ -64,48 +65,55 @@ def do_0rtt(sock):
     return key, my_public
 
 
-def send_0rtt_data(sock, my_public, stream_id, seq, data):
-    plaintext = data.encode('utf-8')
-    encrypted = crypto.encrypt(aes_key, plaintext)
-    payload = (bytes([PACKET_0RTT]) + conn_id + my_public.to_bytes(256, 'big') +
-               varint.encode(stream_id) + varint.encode(seq) + encrypted)
+def send_0rtt_data(sock, my_public, stream_id, offset, data):
+    frame = frames.encode_stream(stream_id, offset, data.encode('utf-8'))
+    encrypted = crypto.encrypt(aes_key, frame)
+    payload = (bytes([PACKET_0RTT]) + conn_id + my_public.to_bytes(256, 'big') + encrypted)
     sock.sendto(payload, (DEST_IP, UDP_PORT))
-    pending_acks[(stream_id, seq)] = (time.time(), data)
-    print(f"[{conn_id.hex()[:8]}] [0-RTT] [Stream {stream_id}] (seq {seq}) SENT: {data}")
+    pending_acks[(stream_id, offset)] = (time.time(), data)
+    print(f"[{conn_id.hex()[:8]}] [0-RTT] [Stream {stream_id}] (offset {offset}) SENT: {data}")
 
 
-def send_data(sock, stream_id, seq, data):
-    plaintext = data.encode('utf-8')
-    encrypted = crypto.encrypt(aes_key, plaintext)
-    payload = bytes([PACKET_DATA]) + conn_id + varint.encode(stream_id) + varint.encode(seq) + encrypted
+def send_data(sock, stream_id, offset, data):
+    frame = frames.encode_stream(stream_id, offset, data.encode('utf-8'))
+    encrypted = crypto.encrypt(aes_key, frame)
+    payload = bytes([PACKET_DATA]) + conn_id + encrypted
     sock.sendto(payload, (DEST_IP, UDP_PORT))
-    pending_acks[(stream_id, seq)] = (time.time(), data)
-    print(f"[{conn_id.hex()[:8]}] [Stream {stream_id}] (seq {seq}) SENT: {data}")
+    pending_acks[(stream_id, offset)] = (time.time(), data)
+    print(f"[{conn_id.hex()[:8]}] [Stream {stream_id}] (offset {offset}) SENT: {data}")
 
 
 def wait_for_acks(sock, timeout_seconds=2.0):
-    """Wait until all pending ACKs received."""
     while pending_acks:
         try:
             payload, addr = sock.recvfrom(1024)
-            if len(payload) >= 10 and payload[0] == PACKET_ACK:
+            if len(payload) >= 10 and payload[0] == PACKET_DATA:
                 recv_conn_id = payload[1:9]
-                stream_id, n1 = varint.decode(payload[9:])
-                seq, n2 = varint.decode(payload[9 + n1:])
+                encrypted = payload[9:]
+                decrypted = crypto.decrypt(aes_key, encrypted)
 
-                key = (stream_id, seq)
-                if key in pending_acks:
-                    del pending_acks[key]
-                    print(f"[{recv_conn_id.hex()[:8]}] [Stream {stream_id}] (seq {seq}) ACK received")
+                pos = 0
+                while pos < len(decrypted):
+                    frame_type, frame_data, consumed = frames.decode_frame(decrypted[pos:])
+                    if frame_type is None:
+                        break
+                    pos += consumed
+
+                    if frame_type == frames.FRAME_ACK:
+                        stream_id, largest_acked = frame_data
+                        key = (stream_id, largest_acked)
+                        if key in pending_acks:
+                            del pending_acks[key]
+                            print(f"[{recv_conn_id.hex()[:8]}] [Stream {stream_id}] (offset {largest_acked}) ACK received")
         except BlockingIOError:
             pass
 
         now = time.time()
         for key, (send_time, data) in list(pending_acks.items()):
             if now - send_time > timeout_seconds:
-                stream_id, seq = key
-                print(f"[Stream {stream_id}] (seq {seq}) TIMEOUT, retransmitting...")
-                send_data(sock, stream_id, seq, data)
+                stream_id, offset = key
+                print(f"[Stream {stream_id}] (offset {offset}) TIMEOUT, retransmitting...")
+                send_data(sock, stream_id, offset, data)
 
 
 def main():
@@ -122,8 +130,8 @@ def main():
         aes_key, my_public = do_0rtt(sock)
 
         sock.setblocking(False)
-        send_0rtt_data(sock, my_public, stream_id=1, seq=1, data="hello")
-        send_0rtt_data(sock, my_public, stream_id=1, seq=2, data="world")
+        send_0rtt_data(sock, my_public, stream_id=1, offset=0, data="hello")
+        send_0rtt_data(sock, my_public, stream_id=1, offset=5, data="world")
         wait_for_acks(sock)
 
         print("\n=== 0-RTT successful! No handshake needed. ===")
@@ -135,8 +143,8 @@ def main():
 
     sock.setblocking(False)
     print("--- Phase 1: Sending from original port ---")
-    send_data(sock, stream_id=1, seq=1, data="hello")
-    send_data(sock, stream_id=1, seq=2, data="world")
+    send_data(sock, stream_id=1, offset=0, data="hello")
+    send_data(sock, stream_id=1, offset=5, data="world")
     wait_for_acks(sock)
 
     print("\n--- Phase 2: Simulating migration (new port) ---")
@@ -145,8 +153,8 @@ def main():
     sock.setblocking(False)
     print("[MIGRATION] Closed old socket, opened new one")
 
-    send_data(sock, stream_id=1, seq=3, data="still")
-    send_data(sock, stream_id=1, seq=4, data="connected!")
+    send_data(sock, stream_id=1, offset=10, data="still")
+    send_data(sock, stream_id=1, offset=15, data="connected!")
     wait_for_acks(sock)
 
     print("\n=== Migration successful! Connection survived port change. ===")
