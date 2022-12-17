@@ -7,6 +7,7 @@ from packet_headers import IPHeader, UDPHeader
 import protocols
 import crypto
 import varint
+import frames
 
 UDP_PORT = 9000
 SERVER_KEY_FILE = 'server_key.bin'
@@ -111,11 +112,9 @@ def main():
                         print(f"[{conn_id.hex()[:8]}] ACCEPT sent\n")
 
                     elif packet_type == PACKET_DATA:
-                        if len(payload) < 11:
+                        if len(payload) < 10:
                             continue
                         conn_id = payload[1:9]
-                        stream_id, n1 = varint.decode(payload[9:])
-                        seq, n2 = varint.decode(payload[9 + n1:])
 
                         if conn_id not in connections:
                             print(f"[{conn_id.hex()[:8]}] Unknown connection, dropping")
@@ -124,25 +123,26 @@ def main():
                         conn = connections[conn_id]
                         conn['last_addr'] = (ip_header.src_ip, udp_header.src_port)
 
-                        if stream_id not in stream_next_deliver:
-                            continue
-
-                        encrypted = payload[9 + n1 + n2:]
+                        encrypted = payload[9:]
                         decrypted = crypto.decrypt(conn['aes_key'], encrypted)
-                        data = decrypted.decode('utf-8').strip()
-                        print(f"[{conn_id.hex()[:8]}] [Stream {stream_id}] (seq {seq}) DATA: {data}")
 
-                        ack_payload = bytes([PACKET_ACK]) + conn_id + varint.encode(stream_id) + varint.encode(seq)
-                        send_udp(tun, ip_header.dest_ip, UDP_PORT, ip_header.src_ip, udp_header.src_port, ack_payload)
-                        print(f"[{conn_id.hex()[:8]}] [Stream {stream_id}] (seq {seq}) ACK sent")
+                        pos = 0
+                        while pos < len(decrypted):
+                            frame_type, frame_data, consumed = frames.decode_frame(decrypted[pos:])
+                            if frame_type is None:
+                                break
+                            pos += consumed
 
-                        stream_pending[stream_id].append((seq, data))
+                            if frame_type == frames.FRAME_STREAM:
+                                stream_id, offset, data_bytes = frame_data
+                                data = data_bytes.decode('utf-8')
+                                print(f"[{conn_id.hex()[:8]}] [Stream {stream_id}] (offset {offset}) DATA: {data}")
 
-                        stream_pending[stream_id].sort(key=lambda x: x[0])
-                        while stream_pending[stream_id] and stream_pending[stream_id][0][0] == stream_next_deliver[stream_id]:
-                            msg = stream_pending[stream_id].pop(0)
-                            print(f"[Stream {stream_id}] (seq {msg[0]}) DELIVERED: {msg[1]}")
-                            stream_next_deliver[stream_id] += 1
+                                ack_frame = frames.encode_ack(stream_id, offset)
+                                ack_encrypted = crypto.encrypt(conn['aes_key'], ack_frame)
+                                ack_payload = bytes([PACKET_DATA]) + conn_id + ack_encrypted
+                                send_udp(tun, ip_header.dest_ip, UDP_PORT, ip_header.src_ip, udp_header.src_port, ack_payload)
+                                print(f"[{conn_id.hex()[:8]}] [Stream {stream_id}] (offset {offset}) ACK sent")
 
                     elif packet_type == PACKET_ACK:
                         stream_id = payload[1]
@@ -150,13 +150,11 @@ def main():
                         print(f"[Stream {stream_id}] (seq {seq}) ACK received")
 
                     elif packet_type == PACKET_0RTT:
-                        if len(payload) < 267:
+                        if len(payload) < 266:
                             continue
                         conn_id = payload[1:9]
                         their_public = int.from_bytes(payload[9:265], 'big')
-                        stream_id, n1 = varint.decode(payload[265:])
-                        seq, n2 = varint.decode(payload[265 + n1:])
-                        encrypted = payload[265 + n1 + n2:]
+                        encrypted = payload[265:]
 
                         if conn_id not in connections:
                             shared_secret = crypto.compute_shared_secret(their_public, server_private)
@@ -169,12 +167,24 @@ def main():
 
                         conn = connections[conn_id]
                         decrypted = crypto.decrypt(conn['aes_key'], encrypted)
-                        data = decrypted.decode('utf-8').strip()
-                        print(f"[{conn_id.hex()[:8]}] [0-RTT] [Stream {stream_id}] (seq {seq}) DATA: {data}")
 
-                        ack_payload = bytes([PACKET_ACK]) + conn_id + varint.encode(stream_id) + varint.encode(seq)
-                        send_udp(tun, ip_header.dest_ip, UDP_PORT, ip_header.src_ip, udp_header.src_port, ack_payload)
-                        print(f"[{conn_id.hex()[:8]}] [0-RTT] [Stream {stream_id}] (seq {seq}) ACK sent")
+                        pos = 0
+                        while pos < len(decrypted):
+                            frame_type, frame_data, consumed = frames.decode_frame(decrypted[pos:])
+                            if frame_type is None:
+                                break
+                            pos += consumed
+
+                            if frame_type == frames.FRAME_STREAM:
+                                stream_id, offset, data_bytes = frame_data
+                                data = data_bytes.decode('utf-8')
+                                print(f"[{conn_id.hex()[:8]}] [0-RTT] [Stream {stream_id}] (offset {offset}) DATA: {data}")
+
+                                ack_frame = frames.encode_ack(stream_id, offset)
+                                ack_encrypted = crypto.encrypt(conn['aes_key'], ack_frame)
+                                ack_payload = bytes([PACKET_DATA]) + conn_id + ack_encrypted
+                                send_udp(tun, ip_header.dest_ip, UDP_PORT, ip_header.src_ip, udp_header.src_port, ack_payload)
+                                print(f"[{conn_id.hex()[:8]}] [0-RTT] [Stream {stream_id}] (offset {offset}) ACK sent")
 
 
 if __name__ == '__main__':
