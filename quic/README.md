@@ -285,7 +285,7 @@ Google's QUIC worked but was proprietary. IETF standardized it as RFC 9000 (2021
 - [x] Step 4: Merged Handshake + 0-RTT (reduce latency)
 - [x] Step 5: Connection IDs (connection migration)
 - [x] Step 6: Encryption (DH key exchange + AES-GCM)
-- [ ] Step 7: QUIC Wire Format (RFC 9000)
+- [x] Step 7: QUIC Wire Format (varints + frames)
 - [ ] Step 8: Integration with custom stack
 
 ---
@@ -479,6 +479,90 @@ We skip these for learning—the basic caching demonstrates the concept.
 
 ---
 
+## How Frames Work (RFC 9000)
+
+### The Problem
+
+Our early packets were single-purpose:
+
+```
+DATA packet  → carries one stream message
+ACK packet   → acknowledges one message
+```
+
+Wasteful. Every ACK needs its own packet. Can't combine multiple streams.
+
+### The Solution: Frames
+
+A packet contains multiple **frames**. Each frame is self-describing:
+
+```
+Packet payload (decrypted):
+┌─────────────────┬─────────────────┬─────────────────┐
+│ STREAM frame    │ ACK frame       │ STREAM frame    │
+│ (stream 1 data) │ (ack offset 5)  │ (stream 2 data) │
+└─────────────────┴─────────────────┴─────────────────┘
+```
+
+One packet, multiple purposes:
+- Piggyback ACKs on data (no separate ACK packet needed)
+- Send to multiple streams at once
+- Add padding, pings, connection close, etc.
+
+### Frame Format
+
+Each frame starts with a type (as a varint), then type-specific fields:
+
+```
+STREAM frame:
+┌────────────┬───────────┬────────┬────────┬──────────┐
+│ type (0x08)│ stream_id │ offset │ length │ data     │
+│ varint     │ varint    │ varint │ varint │ (varies) │
+└────────────┴───────────┴────────┴────────┴──────────┘
+
+ACK frame:
+┌────────────┬───────────┬───────────────┐
+│ type (0x02)│ stream_id │ largest_acked │
+│ varint     │ varint    │ varint        │
+└────────────┴───────────┴───────────────┘
+```
+
+The receiver reads frames one by one until the packet is exhausted.
+
+### Byte Offsets vs Sequence Numbers
+
+Real QUIC uses **byte offsets** instead of packet sequence numbers:
+
+```
+Stream 1:
+  offset=0:   "hello"     (bytes 0-4)
+  offset=5:   "world"     (bytes 5-9)
+  offset=10:  "still"     (bytes 10-14)
+```
+
+This handles variable-size messages and allows reassembly of out-of-order data.
+
+### Why Varints?
+
+Most values are small (stream_id=1, offset=0, length=5). Fixed-size fields waste bytes:
+
+```
+Fixed uint32:  00 00 00 05  (4 bytes for "5")
+Varint:        05           (1 byte!)
+```
+
+First 2 bits indicate length:
+```
+00xxxxxx           → 1 byte  (values 0-63)
+01xxxxxx xxxxxxxx  → 2 bytes (values 0-16,383)
+10...              → 4 bytes (values 0-1 billion)
+11...              → 8 bytes (values 0-4 quintillion)
+```
+
+At Google's scale, varint encoding saves petabytes of bandwidth.
+
+---
+
 ## Implementation Progress & Learnings
 
 ### What We Built
@@ -486,9 +570,11 @@ We skip these for learning—the basic caching demonstrates the concept.
 | Component | File | What It Does |
 |-----------|------|--------------|
 | TCP Multiplexer | `multiplexer.py` | Demonstrates head-of-line blocking |
-| UDP Multiplexer | `udp_multiplexer.py` | Server with per-stream delivery, no blocking |
-| Sender | `sender.py` | Client with retransmission and migration test |
+| UDP Multiplexer | `udp_multiplexer.py` | Server with per-stream delivery, frames, 0-RTT |
+| Sender | `sender.py` | Client with frames, retransmission, migration |
 | Crypto | `crypto.py` | DH key exchange + AES-GCM encryption |
+| Varints | `varint.py` | RFC 9000 variable-length integer encoding |
+| Frames | `frames.py` | STREAM and ACK frame encoding/decoding |
 
 ### Key Learnings
 
@@ -524,6 +610,9 @@ Step 5 (+ conn ID): [type 1B][conn_id 8B][stream_id 1B][seq 2B][encrypted...]
 
 Step 4b (+ 0-RTT): [type 1B][conn_id 8B][client_public 256B][stream_id 1B][seq 2B][encrypted...]
                    ↑ Handshake + data in one packet!
+
+Step 7 (+ frames): [type 1B][conn_id 8B][encrypted([STREAM frame][ACK frame]...)]
+                   ↑ Multiple frames per packet, varints everywhere
 ```
 
 Each addition solved a specific problem we felt firsthand.
@@ -539,14 +628,19 @@ Each addition solved a specific problem we felt firsthand.
 
 - **udp_multiplexer.py** — UDP server with Connection ID support. Looks up
   connections by ID (not IP/port), enabling connection migration. Handles
-  INIT/ACCEPT handshake and 0-RTT packets. Uses persistent DH keypair for
-  0-RTT support. Encrypts/decrypts data with per-connection AES keys.
+  INIT/ACCEPT handshake and 0-RTT packets. Parses STREAM frames and sends
+  ACK frames. Uses persistent DH keypair for 0-RTT support.
 
-- **sender.py** — UDP client that performs DH handshake, sends encrypted data,
-  handles ACKs and retransmission. Caches server's public key for 0-RTT on
-  repeat connections. Includes migration test (closes socket, opens new one,
-  continues sending with same Connection ID).
+- **sender.py** — UDP client that performs DH handshake, sends STREAM frames,
+  handles ACK frames and retransmission. Uses byte offsets instead of sequence
+  numbers. Caches server's public key for 0-RTT. Includes migration test.
 
 - **crypto.py** — Diffie-Hellman key exchange (2048-bit MODP group from RFC 3526)
   and AES-GCM encryption. Functions: generate_private_key, compute_public_key,
   compute_shared_secret, derive_aes_key, encrypt, decrypt.
+
+- **varint.py** — RFC 9000 variable-length integer encoding. First 2 bits
+  indicate length (1/2/4/8 bytes). Small values use fewer bytes.
+
+- **frames.py** — STREAM and ACK frame encoding/decoding. Frames are
+  self-describing units inside packets. Multiple frames per packet.
