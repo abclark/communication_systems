@@ -16,6 +16,7 @@ PACKET_ACCEPT = 0x04
 PACKET_0RTT = 0x05
 
 pending_acks = {}
+rtt_samples = []
 aes_key = None
 conn_id = os.urandom(8)
 
@@ -103,8 +104,11 @@ def wait_for_acks(sock, timeout_seconds=2.0):
                         stream_id, largest_acked = frame_data
                         key = (stream_id, largest_acked)
                         if key in pending_acks:
+                            send_time, data = pending_acks[key]
+                            rtt = time.time() - send_time
+                            rtt_samples.append(rtt)
                             del pending_acks[key]
-                            print(f"[{recv_conn_id.hex()[:8]}] [Stream {stream_id}] (offset {largest_acked}) ACK received")
+                            print(f"[{recv_conn_id.hex()[:8]}] [Stream {stream_id}] (offset {largest_acked}) ACK received (RTT: {rtt*1000:.1f}ms)")
         except BlockingIOError:
             pass
 
@@ -158,6 +162,9 @@ def main():
     wait_for_acks(sock)
 
     print("\n=== Migration successful! Connection survived port change. ===")
+
+    if rtt_samples:
+        print(f"\n[RTT Stats] min={min(rtt_samples)*1000:.1f}ms max={max(rtt_samples)*1000:.1f}ms samples={len(rtt_samples)}")
 
 
 if __name__ == '__main__':
