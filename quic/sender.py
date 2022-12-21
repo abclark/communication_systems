@@ -17,6 +17,9 @@ PACKET_0RTT = 0x05
 
 pending_acks = {}
 rtt_samples = []
+delivered = 0
+delivered_time = None
+delivery_rate_samples = []
 aes_key = None
 conn_id = os.urandom(8)
 
@@ -71,7 +74,7 @@ def send_0rtt_data(sock, my_public, stream_id, offset, data):
     encrypted = crypto.encrypt(aes_key, frame)
     payload = (bytes([PACKET_0RTT]) + conn_id + my_public.to_bytes(256, 'big') + encrypted)
     sock.sendto(payload, (DEST_IP, UDP_PORT))
-    pending_acks[(stream_id, offset)] = (time.time(), data)
+    pending_acks[(stream_id, offset)] = (time.time(), data, delivered, delivered_time)
     print(f"[{conn_id.hex()[:8]}] [0-RTT] [Stream {stream_id}] (offset {offset}) SENT: {data}")
 
 
@@ -80,11 +83,13 @@ def send_data(sock, stream_id, offset, data):
     encrypted = crypto.encrypt(aes_key, frame)
     payload = bytes([PACKET_DATA]) + conn_id + encrypted
     sock.sendto(payload, (DEST_IP, UDP_PORT))
-    pending_acks[(stream_id, offset)] = (time.time(), data)
+    pending_acks[(stream_id, offset)] = (time.time(), data, delivered, delivered_time)
     print(f"[{conn_id.hex()[:8]}] [Stream {stream_id}] (offset {offset}) SENT: {data}")
 
 
 def wait_for_acks(sock, timeout_seconds=2.0):
+    global delivered, delivered_time
+
     while pending_acks:
         try:
             payload, addr = sock.recvfrom(1024)
@@ -104,16 +109,29 @@ def wait_for_acks(sock, timeout_seconds=2.0):
                         stream_id, largest_acked = frame_data
                         key = (stream_id, largest_acked)
                         if key in pending_acks:
-                            send_time, data = pending_acks[key]
-                            rtt = time.time() - send_time
+                            send_time, data, del_at_send, del_time_at_send = pending_acks[key]
+                            now = time.time()
+                            rtt = now - send_time
                             rtt_samples.append(rtt)
+
+                            delivered += len(data)
+                            if del_time_at_send is not None:
+                                time_elapsed = now - del_time_at_send
+                                if time_elapsed > 0:
+                                    rate = (delivered - del_at_send) / time_elapsed
+                                    delivery_rate_samples.append(rate)
+                            else:
+                                rate = len(data) / rtt
+                                delivery_rate_samples.append(rate)
+                            delivered_time = now
+
                             del pending_acks[key]
                             print(f"[{recv_conn_id.hex()[:8]}] [Stream {stream_id}] (offset {largest_acked}) ACK received (RTT: {rtt*1000:.1f}ms)")
         except BlockingIOError:
             pass
 
         now = time.time()
-        for key, (send_time, data) in list(pending_acks.items()):
+        for key, (send_time, data, _, _) in list(pending_acks.items()):
             if now - send_time > timeout_seconds:
                 stream_id, offset = key
                 print(f"[Stream {stream_id}] (offset {offset}) TIMEOUT, retransmitting...")
@@ -139,6 +157,10 @@ def main():
         wait_for_acks(sock)
 
         print("\n=== 0-RTT successful! No handshake needed. ===")
+        if rtt_samples:
+            print(f"\n[RTT Stats] min={min(rtt_samples)*1000:.1f}ms max={max(rtt_samples)*1000:.1f}ms samples={len(rtt_samples)}")
+        if delivery_rate_samples:
+            print(f"[BW Stats] max={max(delivery_rate_samples)/1000:.1f} KB/s samples={len(delivery_rate_samples)}")
         return
     else:
         print("=== FULL HANDSHAKE (no cache) ===\n")
@@ -165,6 +187,8 @@ def main():
 
     if rtt_samples:
         print(f"\n[RTT Stats] min={min(rtt_samples)*1000:.1f}ms max={max(rtt_samples)*1000:.1f}ms samples={len(rtt_samples)}")
+    if delivery_rate_samples:
+        print(f"[BW Stats] max={max(delivery_rate_samples)/1000:.1f} KB/s samples={len(delivery_rate_samples)}")
 
 
 if __name__ == '__main__':
