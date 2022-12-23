@@ -20,6 +20,7 @@ rtt_samples = []
 delivered = 0
 delivered_time = None
 delivery_rate_samples = []
+packets_sent = 0
 aes_key = None
 conn_id = os.urandom(8)
 
@@ -70,21 +71,83 @@ def do_0rtt(sock):
 
 
 def send_0rtt_data(sock, my_public, stream_id, offset, data):
+    global packets_sent
     frame = frames.encode_stream(stream_id, offset, data.encode('utf-8'))
     encrypted = crypto.encrypt(aes_key, frame)
     payload = (bytes([PACKET_0RTT]) + conn_id + my_public.to_bytes(256, 'big') + encrypted)
     sock.sendto(payload, (DEST_IP, UDP_PORT))
     pending_acks[(stream_id, offset)] = (time.time(), data, delivered, delivered_time)
-    print(f"[{conn_id.hex()[:8]}] [0-RTT] [Stream {stream_id}] (offset {offset}) SENT: {data}")
+    packets_sent += 1
 
 
 def send_data(sock, stream_id, offset, data):
+    global packets_sent
     frame = frames.encode_stream(stream_id, offset, data.encode('utf-8'))
     encrypted = crypto.encrypt(aes_key, frame)
     payload = bytes([PACKET_DATA]) + conn_id + encrypted
     sock.sendto(payload, (DEST_IP, UDP_PORT))
     pending_acks[(stream_id, offset)] = (time.time(), data, delivered, delivered_time)
-    print(f"[{conn_id.hex()[:8]}] [Stream {stream_id}] (offset {offset}) SENT: {data}")
+    packets_sent += 1
+
+
+def process_acks(sock):
+    global delivered, delivered_time
+
+    try:
+        while True:
+            payload, addr = sock.recvfrom(1024)
+            if len(payload) >= 10 and payload[0] == PACKET_DATA:
+                recv_conn_id = payload[1:9]
+                encrypted = payload[9:]
+                decrypted = crypto.decrypt(aes_key, encrypted)
+
+                pos = 0
+                while pos < len(decrypted):
+                    frame_type, frame_data, consumed = frames.decode_frame(decrypted[pos:])
+                    if frame_type is None:
+                        break
+                    pos += consumed
+
+                    if frame_type == frames.FRAME_ACK:
+                        stream_id, largest_acked = frame_data
+                        key = (stream_id, largest_acked)
+                        if key in pending_acks:
+                            send_time, data, del_at_send, del_time_at_send = pending_acks[key]
+                            now = time.time()
+                            rtt = now - send_time
+                            rtt_samples.append(rtt)
+
+                            delivered += len(data)
+                            if del_time_at_send is not None:
+                                time_elapsed = now - del_time_at_send
+                                if time_elapsed > 0:
+                                    rate = (delivered - del_at_send) / time_elapsed
+                                    delivery_rate_samples.append(rate)
+                            else:
+                                rate = len(data) / rtt
+                                delivery_rate_samples.append(rate)
+                            delivered_time = now
+
+                            del pending_acks[key]
+    except BlockingIOError:
+        pass
+
+
+def print_stats():
+    print(f"\n{'='*40}")
+    print(f"Packets sent: {packets_sent}")
+    print(f"Packets acked: {len(rtt_samples)}")
+    print(f"Pending: {len(pending_acks)}")
+    if rtt_samples:
+        rtprop = min(rtt_samples)
+        print(f"RTprop (min RTT): {rtprop*1000:.2f}ms")
+    if delivery_rate_samples:
+        btlbw = max(delivery_rate_samples)
+        print(f"BtlBw (max rate): {btlbw/1000:.1f} KB/s")
+    if rtt_samples and delivery_rate_samples:
+        bdp = min(rtt_samples) * max(delivery_rate_samples)
+        print(f"BDP: {bdp:.0f} bytes")
+    print(f"{'='*40}")
 
 
 def wait_for_acks(sock, timeout_seconds=2.0):
@@ -145,54 +208,38 @@ def main():
 
     print("\nSender starting...")
     print("Make sure receiver is running first.")
-    print(f"Sending to {DEST_IP}:{UDP_PORT}\n")
+    print(f"Sending to {DEST_IP}:{UDP_PORT}")
+    print("Press Ctrl+C to stop and see stats.\n")
+
+    messages = ["hello", "world"]
+    msg_index = 0
+    offset = 0
 
     if os.path.exists(SERVER_CACHE_FILE):
-        print("=== 0-RTT MODE (cached key found) ===\n")
+        print("=== 0-RTT MODE ===\n")
         aes_key, my_public = do_0rtt(sock)
-
         sock.setblocking(False)
-        send_0rtt_data(sock, my_public, stream_id=1, offset=0, data="hello")
-        send_0rtt_data(sock, my_public, stream_id=1, offset=5, data="world")
-        wait_for_acks(sock)
-
-        print("\n=== 0-RTT successful! No handshake needed. ===")
-        if rtt_samples:
-            print(f"\n[RTT Stats] min={min(rtt_samples)*1000:.1f}ms max={max(rtt_samples)*1000:.1f}ms samples={len(rtt_samples)}")
-        if delivery_rate_samples:
-            print(f"[BW Stats] max={max(delivery_rate_samples)/1000:.1f} KB/s samples={len(delivery_rate_samples)}")
-        return
+        send_0rtt_data(sock, my_public, stream_id=1, offset=0, data="init")
+        offset = 4
     else:
-        print("=== FULL HANDSHAKE (no cache) ===\n")
+        print("=== FULL HANDSHAKE ===\n")
         aes_key = do_handshake(sock)
+        sock.setblocking(False)
         print()
 
-    sock.setblocking(False)
-    print("--- Phase 1: Sending from original port ---")
-    send_data(sock, stream_id=1, offset=0, data="hello")
-    send_data(sock, stream_id=1, offset=5, data="world")
-    wait_for_acks(sock)
+    print("Streaming data... (Ctrl+C to stop)\n")
 
-    print("\n--- Phase 2: Simulating migration (new port) ---")
-    sock.close()
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.setblocking(False)
-    print("[MIGRATION] Closed old socket, opened new one")
+    while True:
+        msg = messages[msg_index % 2]
+        send_data(sock, stream_id=1, offset=offset, data=msg)
+        offset += len(msg)
+        msg_index += 1
 
-    send_data(sock, stream_id=1, offset=10, data="still")
-    send_data(sock, stream_id=1, offset=15, data="connected!")
-    wait_for_acks(sock)
-
-    print("\n=== Migration successful! Connection survived port change. ===")
-
-    if rtt_samples:
-        print(f"\n[RTT Stats] min={min(rtt_samples)*1000:.1f}ms max={max(rtt_samples)*1000:.1f}ms samples={len(rtt_samples)}")
-    if delivery_rate_samples:
-        print(f"[BW Stats] max={max(delivery_rate_samples)/1000:.1f} KB/s samples={len(delivery_rate_samples)}")
+        process_acks(sock)
 
 
 if __name__ == '__main__':
     try:
         main()
     except KeyboardInterrupt:
-        print("\nDone.")
+        print_stats()
