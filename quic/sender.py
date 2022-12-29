@@ -15,18 +15,15 @@ PACKET_INIT = 0x03
 PACKET_ACCEPT = 0x04
 PACKET_0RTT = 0x05
 
-# Connection state
 pending_acks = {}
 aes_key = None
 conn_id = os.urandom(8)
-
-# Measurement state
 rtt_samples = []
 packets_sent = 0
-
-# Congestion window
-cwnd = 10               # max packets in flight, start small
-last_increase_time = 0
+rtprop = None
+cwnd = 1
+last_cwnd_update = 0
+RTT_THRESHOLD = 1.25
 
 
 def do_handshake(sock):
@@ -119,50 +116,41 @@ def process_acks(sock):
         pass
 
 
-def print_status():
-    global cwnd, last_increase_time
+def update_cwnd():
+    global cwnd, last_cwnd_update, rtprop
 
     if len(rtt_samples) < 20:
         return
 
     now = time.time()
-    if now - last_increase_time < 0.5:
+    if now - last_cwnd_update < 0.5:
         return
 
-    # Get recent RTT stats (last 50 samples)
     recent = rtt_samples[-50:]
-    min_rtt = min(recent)
     avg_rtt = sum(recent) / len(recent)
-    max_rtt = max(recent)
+    min_rtt = min(recent)
+    if rtprop is None or min_rtt < rtprop:
+        rtprop = min_rtt
 
-    # Baseline: min of last 100 samples (rolling window)
-    baseline_window = rtt_samples[-100:] if len(rtt_samples) > 100 else rtt_samples[10:]
-    baseline = min(baseline_window)
-    ratio = avg_rtt / baseline if baseline > 0 else 1.0
+    ratio = avg_rtt / rtprop
+    if ratio < RTT_THRESHOLD:
+        cwnd = cwnd + 1 if cwnd < 10 else int(cwnd * 1.25)
+        action = "INCREASE"
+    else:
+        action = "HOLD"
 
-    print(f"cwnd={cwnd:4} | RTT: min={min_rtt*1000:.2f} avg={avg_rtt*1000:.2f} max={max_rtt*1000:.2f} ms | {ratio:.1f}x baseline | samples={len(rtt_samples)}")
-
-    # Increase cwnd
-    cwnd = int(cwnd * 1.25) if cwnd < 10000 else cwnd
-    last_increase_time = now
+    print(f"cwnd={cwnd:4} | avg={avg_rtt*1000:.1f}ms | {ratio:.2f}x RTprop | {action}")
+    last_cwnd_update = now
 
 
 def print_stats():
-    print(f"\n{'='*50}")
-    print(f"  FINAL STATS")
-    print(f"{'='*50}")
+    print(f"\n{'='*40}")
     print(f"Packets sent: {packets_sent}")
     print(f"Packets acked: {len(rtt_samples)}")
-    print(f"Pending: {len(pending_acks)}")
-
-    if len(rtt_samples) > 20:
-        samples = rtt_samples[10:]  # skip warmup
-        rtprop = min(samples)
-        rtt_max = max(samples)
-        print(f"\nRTprop (min RTT): {rtprop*1000:.2f}ms")
-        print(f"RTT max:          {rtt_max*1000:.2f}ms")
-        print(f"RTT max / RTprop: {rtt_max/rtprop:.1f}x")
-    print(f"{'='*50}")
+    print(f"Final cwnd: {cwnd}")
+    if rtprop:
+        print(f"RTprop: {rtprop*1000:.1f}ms")
+    print(f"{'='*40}")
 
 
 def main():
@@ -170,14 +158,11 @@ def main():
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-    print("\n=== CWND Test ===")
-    print(f"Sending to {DEST_IP}:{UDP_PORT}")
-    print("Increasing cwnd by 25% every 0.5s")
-    print("Watch RTT to see when queuing starts")
+    print(f"\nSending to {DEST_IP}:{UDP_PORT}")
+    print(f"RTT threshold: {RTT_THRESHOLD}x RTprop")
     print("Press Ctrl+C to stop\n")
 
-    # Larger messages to create congestion
-    MSG_SIZE = 1000  # 1KB chunks
+    MSG_SIZE = 1000
     message = "X" * MSG_SIZE
     offset = 0
 
@@ -191,13 +176,12 @@ def main():
         sock.setblocking(False)
 
     while True:
-        # Only send if under cwnd limit
         while len(pending_acks) < cwnd:
             send_data(sock, stream_id=1, offset=offset, data=message)
             offset += len(message)
 
         process_acks(sock)
-        print_status()
+        update_cwnd()
 
 
 if __name__ == '__main__':
