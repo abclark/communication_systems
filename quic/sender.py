@@ -25,11 +25,12 @@ cwnd = 1
 last_cwnd_update = 0
 
 RTT_THRESHOLD = 1.25
-DRAIN_EXIT = 1.05
+DRAIN_EXIT = 1.10
 CRUISE_DURATION = 5.0
 
 state = 'STARTUP'
 state_start_time = 0
+last_send_time = 0
 
 
 def do_handshake(sock):
@@ -181,7 +182,7 @@ def print_stats():
 
 
 def main():
-    global aes_key
+    global aes_key, last_send_time
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
@@ -203,9 +204,13 @@ def main():
         sock.setblocking(False)
 
     while True:
-        while len(pending_acks) < cwnd:
+        now = time.time()
+        pacing_interval = rtprop / cwnd if rtprop and cwnd > 0 else 0
+
+        if len(pending_acks) < cwnd and now - last_send_time >= pacing_interval:
             send_data(sock, stream_id=1, offset=offset, data=message)
             offset += len(message)
+            last_send_time = now
 
         process_acks(sock)
         update_cwnd()
