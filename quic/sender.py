@@ -23,7 +23,13 @@ packets_sent = 0
 rtprop = None
 cwnd = 1
 last_cwnd_update = 0
+
 RTT_THRESHOLD = 1.25
+DRAIN_EXIT = 1.05
+CRUISE_DURATION = 5.0
+
+state = 'STARTUP'
+state_start_time = 0
 
 
 def do_handshake(sock):
@@ -117,7 +123,7 @@ def process_acks(sock):
 
 
 def update_cwnd():
-    global cwnd, last_cwnd_update, rtprop
+    global cwnd, last_cwnd_update, rtprop, state, state_start_time
 
     if len(rtt_samples) < 20:
         return
@@ -133,13 +139,34 @@ def update_cwnd():
         rtprop = min_rtt
 
     ratio = avg_rtt / rtprop
-    if ratio < RTT_THRESHOLD:
-        cwnd = cwnd + 1 if cwnd < 10 else int(cwnd * 1.25)
-        action = "INCREASE"
-    else:
-        action = "HOLD"
 
-    print(f"cwnd={cwnd:4} | avg={avg_rtt*1000:.1f}ms | {ratio:.2f}x RTprop | {action}")
+    if state == 'STARTUP':
+        if ratio < RTT_THRESHOLD:
+            cwnd = cwnd + 1 if cwnd < 10 else int(cwnd * 1.25)
+        else:
+            state = 'DRAIN'
+            state_start_time = now
+
+    elif state == 'CRUISE':
+        if now - state_start_time > CRUISE_DURATION:
+            state = 'PROBE'
+            state_start_time = now
+
+    elif state == 'PROBE':
+        if ratio < RTT_THRESHOLD:
+            cwnd = cwnd + 1 if cwnd < 10 else int(cwnd * 1.25)
+        else:
+            state = 'DRAIN'
+            state_start_time = now
+
+    elif state == 'DRAIN':
+        if ratio < DRAIN_EXIT:
+            state = 'CRUISE'
+            state_start_time = now
+        else:
+            cwnd = max(1, cwnd - 1)
+
+    print(f"cwnd={cwnd:4} | avg={avg_rtt*1000:.1f}ms | {ratio:.2f}x | {state}")
     last_cwnd_update = now
 
 
@@ -159,7 +186,7 @@ def main():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     print(f"\nSending to {DEST_IP}:{UDP_PORT}")
-    print(f"RTT threshold: {RTT_THRESHOLD}x RTprop")
+    print(f"States: STARTUP → CRUISE ({CRUISE_DURATION}s) → PROBE → DRAIN → ...")
     print("Press Ctrl+C to stop\n")
 
     MSG_SIZE = 1000
