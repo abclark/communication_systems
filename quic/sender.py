@@ -4,6 +4,7 @@ import time
 import crypto
 import varint
 import frames
+from bbr import BBR
 
 DEST_IP = '192.168.100.100'
 UDP_PORT = 9000
@@ -18,25 +19,10 @@ PACKET_0RTT = 0x05
 pending_acks = {}
 aes_key = None
 conn_id = os.urandom(8)
-rtt_samples = []
 packets_sent = 0
-rtprop = None
-cwnd = 1
-last_cwnd_update = 0
-
-RTT_THRESHOLD = 1.25
-DRAIN_EXIT = 1.10
-CRUISE_DURATION = 5.0
-PROBE_RTT_INTERVAL = 10.0
-PROBE_RTT_DURATION = 0.2
-PROBE_RTT_CWND = 4
-DRAIN_TIMEOUT = 5.0
-
-state = 'STARTUP'
-state_start_time = 0
 last_send_time = 0
-rtprop_updated_time = 0
-pre_probe_rtt_cwnd = None
+
+controller = BBR()
 
 
 def do_handshake(sock):
@@ -123,85 +109,19 @@ def process_acks(sock):
                         if key in pending_acks:
                             send_time, data = pending_acks[key]
                             rtt = time.time() - send_time
-                            rtt_samples.append(rtt)
+                            controller.on_ack(rtt)
                             del pending_acks[key]
     except BlockingIOError:
         pass
 
 
-def update_cwnd():
-    global cwnd, last_cwnd_update, rtprop, state, state_start_time
-    global rtprop_updated_time, pre_probe_rtt_cwnd
-
-    if len(rtt_samples) < 20:
-        return
-
-    now = time.time()
-    if now - last_cwnd_update < 0.5:
-        return
-
-    recent = rtt_samples[-50:]
-    avg_rtt = sum(recent) / len(recent)
-    min_rtt = min(recent)
-    if rtprop is None or min_rtt < rtprop:
-        rtprop = min_rtt
-        rtprop_updated_time = now
-
-    ratio = avg_rtt / rtprop
-
-    if state == 'STARTUP':
-        if ratio < RTT_THRESHOLD:
-            cwnd = cwnd + 1 if cwnd < 10 else int(cwnd * 1.25)
-        else:
-            state = 'DRAIN'
-            state_start_time = now
-
-    elif state == 'CRUISE':
-        if now - rtprop_updated_time > PROBE_RTT_INTERVAL:
-            pre_probe_rtt_cwnd = cwnd
-            cwnd = PROBE_RTT_CWND
-            state = 'PROBE_RTT'
-            state_start_time = now
-        elif now - state_start_time > CRUISE_DURATION:
-            state = 'PROBE'
-            state_start_time = now
-
-    elif state == 'PROBE':
-        if ratio < RTT_THRESHOLD:
-            cwnd = cwnd + 1 if cwnd < 10 else int(cwnd * 1.25)
-        else:
-            state = 'DRAIN'
-            state_start_time = now
-
-    elif state == 'DRAIN':
-        if ratio < DRAIN_EXIT:
-            state = 'CRUISE'
-            state_start_time = now
-        elif now - state_start_time > DRAIN_TIMEOUT:
-            rtprop = min_rtt
-            rtprop_updated_time = now
-            print(f"  → RTprop reset to {rtprop*1000:.1f}ms (stuck in DRAIN)")
-        else:
-            cwnd = max(1, cwnd - 1)
-
-    elif state == 'PROBE_RTT':
-        if now - state_start_time > PROBE_RTT_DURATION:
-            cwnd = pre_probe_rtt_cwnd
-            rtprop_updated_time = now
-            state = 'CRUISE'
-            state_start_time = now
-
-    print(f"cwnd={cwnd:4} | avg={avg_rtt*1000:.1f}ms | {ratio:.2f}x | {state}")
-    last_cwnd_update = now
-
-
 def print_stats():
     print(f"\n{'='*40}")
     print(f"Packets sent: {packets_sent}")
-    print(f"Packets acked: {len(rtt_samples)}")
-    print(f"Final cwnd: {cwnd}")
-    if rtprop:
-        print(f"RTprop: {rtprop*1000:.1f}ms")
+    print(f"Packets acked: {len(controller.rtt_samples)}")
+    print(f"Final cwnd: {controller.cwnd}")
+    if controller.rtprop:
+        print(f"RTprop: {controller.rtprop*1000:.1f}ms")
     print(f"{'='*40}")
 
 
@@ -211,7 +131,6 @@ def main():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     print(f"\nSending to {DEST_IP}:{UDP_PORT}")
-    print(f"States: STARTUP → DRAIN → CRUISE → PROBE/PROBE_RTT → ...")
     print("Press Ctrl+C to stop\n")
 
     MSG_SIZE = 1000
@@ -227,17 +146,28 @@ def main():
         aes_key = do_handshake(sock)
         sock.setblocking(False)
 
+    last_decision = None
+
     while True:
         now = time.time()
-        pacing_interval = rtprop / cwnd if rtprop and cwnd > 0 else 0
+        decision = controller.update(now)
 
-        if len(pending_acks) < cwnd and now - last_send_time >= pacing_interval:
-            send_data(sock, stream_id=1, offset=offset, data=message)
-            offset += len(message)
-            last_send_time = now
+        if len(pending_acks) < decision.cwnd:
+            if now - last_send_time >= decision.pacing_interval:
+                send_data(sock, stream_id=1, offset=offset, data=message)
+                offset += len(message)
+                last_send_time = now
 
         process_acks(sock)
-        update_cwnd()
+
+        if decision.rtprop_reset:
+            print(f"  → RTprop reset to {decision.rtprop*1000:.1f}ms")
+
+        if decision.cwnd != (last_decision.cwnd if last_decision else 0) or \
+           decision.state != (last_decision.state if last_decision else ''):
+            ratio = decision.avg_rtt / decision.rtprop if decision.rtprop else 0
+            print(f"cwnd={decision.cwnd:4} | avg={decision.avg_rtt*1000:.1f}ms | {ratio:.2f}x | {decision.state}")
+            last_decision = decision
 
 
 if __name__ == '__main__':
