@@ -27,10 +27,16 @@ last_cwnd_update = 0
 RTT_THRESHOLD = 1.25
 DRAIN_EXIT = 1.10
 CRUISE_DURATION = 5.0
+PROBE_RTT_INTERVAL = 10.0
+PROBE_RTT_DURATION = 0.2
+PROBE_RTT_CWND = 4
+DRAIN_TIMEOUT = 5.0
 
 state = 'STARTUP'
 state_start_time = 0
 last_send_time = 0
+rtprop_updated_time = 0
+pre_probe_rtt_cwnd = None
 
 
 def do_handshake(sock):
@@ -125,6 +131,7 @@ def process_acks(sock):
 
 def update_cwnd():
     global cwnd, last_cwnd_update, rtprop, state, state_start_time
+    global rtprop_updated_time, pre_probe_rtt_cwnd
 
     if len(rtt_samples) < 20:
         return
@@ -138,6 +145,7 @@ def update_cwnd():
     min_rtt = min(recent)
     if rtprop is None or min_rtt < rtprop:
         rtprop = min_rtt
+        rtprop_updated_time = now
 
     ratio = avg_rtt / rtprop
 
@@ -149,7 +157,12 @@ def update_cwnd():
             state_start_time = now
 
     elif state == 'CRUISE':
-        if now - state_start_time > CRUISE_DURATION:
+        if now - rtprop_updated_time > PROBE_RTT_INTERVAL:
+            pre_probe_rtt_cwnd = cwnd
+            cwnd = PROBE_RTT_CWND
+            state = 'PROBE_RTT'
+            state_start_time = now
+        elif now - state_start_time > CRUISE_DURATION:
             state = 'PROBE'
             state_start_time = now
 
@@ -164,8 +177,19 @@ def update_cwnd():
         if ratio < DRAIN_EXIT:
             state = 'CRUISE'
             state_start_time = now
+        elif now - state_start_time > DRAIN_TIMEOUT:
+            rtprop = min_rtt
+            rtprop_updated_time = now
+            print(f"  → RTprop reset to {rtprop*1000:.1f}ms (stuck in DRAIN)")
         else:
             cwnd = max(1, cwnd - 1)
+
+    elif state == 'PROBE_RTT':
+        if now - state_start_time > PROBE_RTT_DURATION:
+            cwnd = pre_probe_rtt_cwnd
+            rtprop_updated_time = now
+            state = 'CRUISE'
+            state_start_time = now
 
     print(f"cwnd={cwnd:4} | avg={avg_rtt*1000:.1f}ms | {ratio:.2f}x | {state}")
     last_cwnd_update = now
@@ -187,7 +211,7 @@ def main():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     print(f"\nSending to {DEST_IP}:{UDP_PORT}")
-    print(f"States: STARTUP → CRUISE ({CRUISE_DURATION}s) → PROBE → DRAIN → ...")
+    print(f"States: STARTUP → DRAIN → CRUISE → PROBE/PROBE_RTT → ...")
     print("Press Ctrl+C to stop\n")
 
     MSG_SIZE = 1000
