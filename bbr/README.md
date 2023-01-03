@@ -168,19 +168,22 @@ Minimum = true propagation delay (higher samples had queuing).
 ## The BBR State Machine
 
 ```
-STARTUP ──► DRAIN ──► PROBE_BW ◄──► PROBE_RTT
+STARTUP ──► DRAIN ──► CRUISE ◄──► PROBE
+                        │           │
+                        └► PROBE_RTT◄┘
 ```
 
-**STARTUP:** Double rate each RTT until bandwidth stops increasing. Find the pipe capacity.
+**STARTUP:** Increase cwnd until RTT rises above 1.25× RTprop. Find initial capacity.
 
-**DRAIN:** We overfilled queues. Send at 0.75× to empty them.
+**DRAIN:** Decrease cwnd until RTT returns to ~1.1× RTprop. Empty queues.
 
-**PROBE_BW:** Steady state. Cycle through phases:
-- 1.25× (probe for more bandwidth)
-- 0.75× (drain any queue)
-- 1.0× (cruise) × 6 rounds
+**CRUISE:** Hold cwnd steady for 5 seconds. Stable operation.
 
-**PROBE_RTT:** Every ~10 seconds, reduce in-flight dramatically to measure true RTprop.
+**PROBE:** Increase cwnd to discover new bandwidth. If RTT rises → DRAIN.
+
+**PROBE_RTT:** Every ~10 seconds, reduce cwnd to minimum to measure fresh RTprop. Handles route changes where propagation delay drops.
+
+**DRAIN timeout:** If stuck draining >5 seconds, reset RTprop to current RTT. Handles route changes where propagation delay increases.
 
 ---
 
@@ -293,10 +296,13 @@ sudo pfctl -F all
 - [x] Step 1: Track packets (send time, RTT)
 - [x] Step 2: Estimate RTprop (minimum RTT)
 - [x] Step 3: Limit in-flight based on RTT (stop when RTT > 1.25× RTprop)
-- [ ] Step 4: Implement pacing
-- [ ] Step 5: Measure BtlBw (delivery rate) and calculate true BDP
-- [ ] Step 6: State machine (startup, drain, probe_bw, probe_rtt)
-- [ ] Step 7: Test and visualize
+- [x] Step 4: Implement pacing (spread packets over RTT)
+- [x] Step 5: State machine (STARTUP → DRAIN → CRUISE → PROBE → PROBE_RTT)
+- [x] Step 6: Adaptive RTprop (handle both increases and decreases)
+- [x] Step 7: Test with varying network conditions (dummynet)
+- [ ] Optional: Measure BtlBw (delivery rate) for calculated BDP
+
+**Note:** We discover BDP empirically by probing until RTT rises, rather than calculating it from BtlBw × RTprop. This works well in practice.
 
 ---
 
@@ -328,5 +334,32 @@ RTprop = min(rtt samples)
 
 ## Files
 
-- `quic/sender.py` — Client with RTT-based congestion control
-- `quic/udp_multiplexer.py` — Server (echoes ACKs)
+```
+bbr/
+  __init__.py          — Package exports (BBR, CongestionController, CongestionDecision)
+  bbr.py               — BBR implementation (state machine, RTprop tracking, pacing)
+  README.md            — This file
+
+quic/
+  sender.py            — QUIC client using BBR for congestion control
+  udp_multiplexer.py   — QUIC server (echoes ACKs)
+```
+
+## Usage
+
+```python
+from bbr import BBR
+
+controller = BBR()
+
+# On each ACK, record RTT
+controller.on_ack(rtt)
+
+# Periodically get send decision
+decision = controller.update(time.time())
+
+# Use decision
+if inflight < decision.cwnd:
+    if time_since_last_send >= decision.pacing_interval:
+        send_packet()
+```
