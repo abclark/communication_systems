@@ -45,6 +45,37 @@ def decode_varint(data: bytes, offset: int = 0) -> tuple[int, int]:
         shift += 7
     return (result, position - offset)
 
+
+# =============================================================================
+# WIRE TYPES
+# =============================================================================
+
+WIRE_TYPE_VARINT = 0  # int32, int64, uint32, uint64, bool, enum
+WIRE_TYPE_I64 = 1     # fixed64, sfixed64, double
+WIRE_TYPE_LEN = 2     # string, bytes, nested messages, repeated
+WIRE_TYPE_I32 = 5     # fixed32, sfixed32, float
+
+
+# =============================================================================
+# TAGS
+# =============================================================================
+
+def encode_tag(field_number: int, wire_type: int) -> bytes:
+    """Encode a field tag as a varint."""
+    tag = (field_number << 3) | wire_type
+    return encode_varint(tag)
+
+def decode_tag(data: bytes, offset: int = 0) -> tuple[int, int, int]:
+    """
+    Decode a tag from bytes.
+
+    Returns: (field_number, wire_type, bytes_consumed)
+    """
+    tag, length = decode_varint(data, offset)
+    wire_type = tag & 0x07
+    field_number = tag >> 3
+    return (field_number, wire_type, length)
+
 # Quick test
 if __name__ == "__main__":
     # Test cases: (input, expected_output)
@@ -67,3 +98,22 @@ if __name__ == "__main__":
         value, length = decode_varint(encoded)
         status = "✓" if value == expected_value else "✗"
         print(f"  {status} decode_varint({encoded.hex()}) = {value}, expected {expected_value}")
+
+    # Tag tests
+    print("\nTags:")
+    tag_tests = [
+        (1, WIRE_TYPE_VARINT, b'\x08'),   # field 1, varint
+        (2, WIRE_TYPE_LEN, b'\x12'),       # field 2, length-delimited
+        (3, WIRE_TYPE_VARINT, b'\x18'),   # field 3, varint
+        (15, WIRE_TYPE_VARINT, b'\x78'),  # field 15, varint
+        (16, WIRE_TYPE_VARINT, b'\x80\x01'),  # field 16, varint (2-byte tag)
+    ]
+    for field_num, wire_type, expected in tag_tests:
+        encoded = encode_tag(field_num, wire_type)
+        status = "✓" if encoded == expected else "✗"
+        print(f"  {status} encode_tag({field_num}, {wire_type}) = {encoded.hex() if encoded else None}, expected {expected.hex()}")
+
+        # Also test decoding
+        decoded_field, decoded_wire, _ = decode_tag(expected)
+        status = "✓" if (decoded_field == field_num and decoded_wire == wire_type) else "✗"
+        print(f"  {status} decode_tag({expected.hex()}) = field {decoded_field}, wire {decoded_wire}")
