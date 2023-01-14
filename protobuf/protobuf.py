@@ -76,6 +76,25 @@ def decode_tag(data: bytes, offset: int = 0) -> tuple[int, int, int]:
     field_number = tag >> 3
     return (field_number, wire_type, length)
 
+
+# =============================================================================
+# FIELD ENCODING
+# =============================================================================
+
+def encode_int_field(field_number: int, value: int) -> bytes:
+    """Encode an integer field (wire type 0)."""
+    tag = encode_tag(field_number, WIRE_TYPE_VARINT)
+    encoded_value = encode_varint(value)
+    return tag + encoded_value
+
+
+def encode_string_field(field_number: int, value: str) -> bytes:
+    """Encode a string field (wire type 2)."""
+    tag = encode_tag(field_number, WIRE_TYPE_LEN)
+    data = value.encode('utf-8')
+    length = encode_varint(len(data))
+    return tag + length + data
+
 # Quick test
 if __name__ == "__main__":
     # Test cases: (input, expected_output)
@@ -117,3 +136,27 @@ if __name__ == "__main__":
         decoded_field, decoded_wire, _ = decode_tag(expected)
         status = "✓" if (decoded_field == field_num and decoded_wire == wire_type) else "✗"
         print(f"  {status} decode_tag({expected.hex()}) = field {decoded_field}, wire {decoded_wire}")
+
+    # Field encoding tests
+    print("\nInteger fields:")
+    field_tests = [
+        (1, 150, b'\x08\x96\x01'),     # field 1, value 150
+        (2, 300, b'\x10\xac\x02'),     # field 2, value 300
+        (1, 1, b'\x08\x01'),           # field 1, value 1
+    ]
+    for field_num, value, expected in field_tests:
+        encoded = encode_int_field(field_num, value)
+        status = "✓" if encoded == expected else "✗"
+        print(f"  {status} encode_int_field({field_num}, {value}) = {encoded.hex() if encoded else None}, expected {expected.hex()}")
+
+    # String field tests
+    print("\nString fields:")
+    string_tests = [
+        (2, "Alice", b'\x12\x05Alice'),   # field 2, "Alice"
+        (1, "hi", b'\x0a\x02hi'),          # field 1, "hi"
+        (3, "", b'\x1a\x00'),              # field 3, empty string
+    ]
+    for field_num, value, expected in string_tests:
+        encoded = encode_string_field(field_num, value)
+        status = "✓" if encoded == expected else "✗"
+        print(f"  {status} encode_string_field({field_num}, '{value}') = {encoded.hex() if encoded else None}, expected {expected.hex()}")
