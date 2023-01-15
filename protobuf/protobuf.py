@@ -95,6 +95,36 @@ def encode_string_field(field_number: int, value: str) -> bytes:
     length = encode_varint(len(data))
     return tag + length + data
 
+
+def encode_fixed32_field(field_number: int, value: int) -> bytes:
+    """Encode a fixed 32-bit field (wire type 5)."""
+    tag = encode_tag(field_number, WIRE_TYPE_I32)
+    # 4 bytes, little-endian
+    value_bytes = bytes([
+        value & 0xFF,
+        (value >> 8) & 0xFF,
+        (value >> 16) & 0xFF,
+        (value >> 24) & 0xFF,
+    ])
+    return tag + value_bytes
+
+
+def encode_fixed64_field(field_number: int, value: int) -> bytes:
+    """Encode a fixed 64-bit field (wire type 1)."""
+    tag = encode_tag(field_number, WIRE_TYPE_I64)
+    # 8 bytes, little-endian
+    value_bytes = bytes([
+        value & 0xFF,
+        (value >> 8) & 0xFF,
+        (value >> 16) & 0xFF,
+        (value >> 24) & 0xFF,
+        (value >> 32) & 0xFF,
+        (value >> 40) & 0xFF,
+        (value >> 48) & 0xFF,
+        (value >> 56) & 0xFF,
+    ])
+    return tag + value_bytes
+
 # Quick test
 if __name__ == "__main__":
     # Test cases: (input, expected_output)
@@ -160,3 +190,26 @@ if __name__ == "__main__":
         encoded = encode_string_field(field_num, value)
         status = "✓" if encoded == expected else "✗"
         print(f"  {status} encode_string_field({field_num}, '{value}') = {encoded.hex() if encoded else None}, expected {expected.hex()}")
+
+    # Fixed32 field tests
+    print("\nFixed32 fields:")
+    fixed32_tests = [
+        (3, 1000, b'\x1d\xe8\x03\x00\x00'),    # field 3, value 1000
+        (1, 1, b'\x0d\x01\x00\x00\x00'),        # field 1, value 1
+        (2, 0xFFFFFFFF, b'\x15\xff\xff\xff\xff'),  # field 2, max uint32
+    ]
+    for field_num, value, expected in fixed32_tests:
+        encoded = encode_fixed32_field(field_num, value)
+        status = "✓" if encoded == expected else "✗"
+        print(f"  {status} encode_fixed32_field({field_num}, {value}) = {encoded.hex()}, expected {expected.hex()}")
+
+    # Fixed64 field tests
+    print("\nFixed64 fields:")
+    fixed64_tests = [
+        (4, 1000, b'\x21\xe8\x03\x00\x00\x00\x00\x00\x00'),  # field 4, value 1000
+        (1, 1, b'\x09\x01\x00\x00\x00\x00\x00\x00\x00'),      # field 1, value 1
+    ]
+    for field_num, value, expected in fixed64_tests:
+        encoded = encode_fixed64_field(field_num, value)
+        status = "✓" if encoded == expected else "✗"
+        print(f"  {status} encode_fixed64_field({field_num}, {value}) = {encoded.hex()}, expected {expected.hex()}")
