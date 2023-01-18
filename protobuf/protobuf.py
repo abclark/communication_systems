@@ -96,6 +96,25 @@ def decode_fixed32(data: bytes, offset: int = 0) -> tuple[int, int]:
     return (value, 4)
 
 
+def decode_fixed64(data: bytes, offset: int = 0) -> tuple[int, int]:
+    """
+    Decode a fixed 64-bit value from bytes.
+
+    Returns: (value, bytes_consumed)
+    """
+    value = (
+        data[offset] |
+        (data[offset + 1] << 8) |
+        (data[offset + 2] << 16) |
+        (data[offset + 3] << 24) |
+        (data[offset + 4] << 32) |
+        (data[offset + 5] << 40) |
+        (data[offset + 6] << 48) |
+        (data[offset + 7] << 56)
+    )
+    return (value, 8)
+
+
 # =============================================================================
 # FIELD ENCODING
 # =============================================================================
@@ -244,3 +263,14 @@ if __name__ == "__main__":
         value, consumed = decode_fixed32(data)
         status = "✓" if value == expected and consumed == 4 else "✗"
         print(f"  {status} decode_fixed32({data.hex()}) = {value}, expected {expected}")
+
+    # Decode fixed64 tests
+    print("\nDecode fixed64:")
+    decode_fixed64_tests = [
+        (b'\xe8\x03\x00\x00\x00\x00\x00\x00', 1000),
+        (b'\x01\x00\x00\x00\x00\x00\x00\x00', 1),
+    ]
+    for data, expected in decode_fixed64_tests:
+        value, consumed = decode_fixed64(data)
+        status = "✓" if value == expected and consumed == 8 else "✗"
+        print(f"  {status} decode_fixed64({data.hex()}) = {value}, expected {expected}")
