@@ -115,6 +115,57 @@ def decode_fixed64(data: bytes, offset: int = 0) -> tuple[int, int]:
     return (value, 8)
 
 
+def decode_length_delimited(data: bytes, offset: int = 0) -> tuple[bytes, int]:
+    """
+    Decode a length-delimited value (wire type 2).
+
+    Returns: (raw_bytes, bytes_consumed)
+    """
+    length, varint_size = decode_varint(data, offset)
+    start = offset + varint_size
+    end = start + length
+    return (data[start:end], varint_size + length)
+
+
+# =============================================================================
+# MESSAGE DECODING
+# =============================================================================
+
+def decode_message(data: bytes) -> dict:
+    """
+    Decode a protobuf message into a dict of {field_number: value}.
+
+    Note: This is a raw decoder - it doesn't know field names,
+    just returns field numbers with their decoded values.
+    """
+    offset = 0
+    result = {}
+
+    while offset < len(data):
+        # Step 1: Read the tag
+        field_num, wire_type, consumed = decode_tag(data, offset)
+        offset += consumed
+
+        # Step 2: Based on wire type, decode the value
+        # Wire types: 0=VARINT, 1=I64, 2=LEN, 5=I32
+        if wire_type == WIRE_TYPE_VARINT:
+            value, consumed = decode_varint(data, offset)
+        elif wire_type == WIRE_TYPE_I64:
+            value, consumed = decode_fixed64(data, offset)
+        elif wire_type == WIRE_TYPE_LEN:
+            value, consumed = decode_length_delimited(data, offset)
+        elif wire_type == WIRE_TYPE_I32:
+            value, consumed = decode_fixed32(data, offset)
+        else:
+            raise ValueError(f"Unknown wire type: {wire_type}")
+        
+        # Step 3: Store result and advance offset
+        offset += consumed
+        result[field_num] = value
+
+    return result
+
+
 # =============================================================================
 # FIELD ENCODING
 # =============================================================================
@@ -274,3 +325,42 @@ if __name__ == "__main__":
         value, consumed = decode_fixed64(data)
         status = "✓" if value == expected and consumed == 8 else "✗"
         print(f"  {status} decode_fixed64({data.hex()}) = {value}, expected {expected}")
+
+    # Decode length-delimited tests
+    print("\nDecode length-delimited:")
+    decode_len_tests = [
+        (b'\x02Hi', b'Hi', 3),         # length 2, "Hi", consumed 3
+        (b'\x05Hello', b'Hello', 6),   # length 5, "Hello", consumed 6
+        (b'\x00', b'', 1),              # length 0, empty, consumed 1
+    ]
+    for data, expected_bytes, expected_consumed in decode_len_tests:
+        value, consumed = decode_length_delimited(data)
+        status = "✓" if value == expected_bytes and consumed == expected_consumed else "✗"
+        print(f"  {status} decode_length_delimited({data.hex()}) = {value}, consumed {consumed}")
+
+    # Full message decode tests
+    print("\nDecode message:")
+    # Test 1: Single int field (field 1 = 150)
+    msg1 = encode_int_field(1, 150)
+    decoded1 = decode_message(msg1)
+    status = "✓" if decoded1 == {1: 150} else "✗"
+    print(f"  {status} decode_message({msg1.hex()}) = {decoded1}, expected {{1: 150}}")
+
+    # Test 2: Int + String (field 1 = 150, field 2 = "Hi")
+    msg2 = encode_int_field(1, 150) + encode_string_field(2, "Hi")
+    decoded2 = decode_message(msg2)
+    expected2 = {1: 150, 2: b'Hi'}  # Note: LEN returns raw bytes
+    status = "✓" if decoded2 == expected2 else "✗"
+    print(f"  {status} decode_message({msg2.hex()}) = {decoded2}, expected {expected2}")
+
+    # Test 3: All wire types
+    msg3 = (
+        encode_int_field(1, 42) +           # wire type 0
+        encode_string_field(2, "test") +    # wire type 2
+        encode_fixed32_field(3, 1000) +     # wire type 5
+        encode_fixed64_field(4, 9999)       # wire type 1
+    )
+    decoded3 = decode_message(msg3)
+    expected3 = {1: 42, 2: b'test', 3: 1000, 4: 9999}
+    status = "✓" if decoded3 == expected3 else "✗"
+    print(f"  {status} decode_message (all wire types) = {decoded3}")
