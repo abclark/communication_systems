@@ -50,6 +50,23 @@ def decode_frame(data: bytes, offset: int = 0) -> tuple[int, bytes, int]:
 
 
 # =============================================================================
+# HEADER ENCODING
+# =============================================================================
+
+def encode_headers(headers: dict) -> bytes:
+    """
+    Encode headers as: [name_len][name][value_len][value]...
+    """
+    result = b''
+    for name, value in headers.items():
+        name_bytes = name.encode('utf-8')
+        value_bytes = value.encode('utf-8')
+        result += encode_varint(len(name_bytes)) + name_bytes
+        result += encode_varint(len(value_bytes)) + value_bytes
+    return result
+
+
+# =============================================================================
 # TESTS
 # =============================================================================
 
@@ -72,3 +89,10 @@ if __name__ == "__main__":
     # Test 3: Round-trip check
     success = frame_type == FRAME_DATA and payload == b"Hello"
     print(f"\n3. Round-trip: {'✓ Pass' if success else '✗ Fail'}")
+
+    # Test 4: Encode headers
+    headers = {":method": "GET", ":path": "/hello"}
+    encoded = encode_headers(headers)
+    print(f"\n4. Encode headers:")
+    print(f"   Input:  {headers}")
+    print(f"   Hex:    {encoded.hex()}")
