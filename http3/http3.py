@@ -66,6 +66,29 @@ def encode_headers(headers: dict) -> bytes:
     return result
 
 
+def decode_headers(data: bytes) -> dict:
+    """
+    Decode headers from: [name_len][name][value_len][value]...
+    """
+    headers = {}
+    offset = 0
+    while offset < len(data):
+        # Read name
+        name_len, consumed = decode_varint(data, offset)
+        offset += consumed
+        name = data[offset : offset + name_len].decode('utf-8')
+        offset += name_len
+
+        # Read value
+        value_len, consumed = decode_varint(data, offset)
+        offset += consumed
+        value = data[offset : offset + value_len].decode('utf-8')
+        offset += value_len
+
+        headers[name] = value
+    return headers
+
+
 # =============================================================================
 # TESTS
 # =============================================================================
@@ -96,3 +119,10 @@ if __name__ == "__main__":
     print(f"\n4. Encode headers:")
     print(f"   Input:  {headers}")
     print(f"   Hex:    {encoded.hex()}")
+
+    # Test 5: Decode headers
+    decoded = decode_headers(encoded)
+    print(f"\n5. Decode headers:")
+    print(f"   Output: {decoded}")
+    success = decoded == headers
+    print(f"   Round-trip: {'✓ Pass' if success else '✗ Fail'}")
