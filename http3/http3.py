@@ -90,6 +90,42 @@ def decode_headers(data: bytes) -> dict:
 
 
 # =============================================================================
+# REQUEST / RESPONSE HELPERS
+# =============================================================================
+
+def build_request(method: str, path: str) -> bytes:
+    """
+    Build a complete HTTP/3 request.
+
+    Returns: HEADERS frame
+    """
+    headers = {
+        ":method": method,
+        ":path": path,
+    }
+    headers_bytes = encode_headers(headers)
+    return encode_frame(FRAME_HEADERS, headers_bytes)
+
+
+def build_response(status: int, body: bytes = b"") -> bytes:
+    """
+    Build a complete HTTP/3 response.
+
+    Returns: HEADERS frame + DATA frame (if body)
+    """
+    # HEADERS frame
+    headers = {":status": str(status)}
+    headers_bytes = encode_headers(headers)
+    result = encode_frame(FRAME_HEADERS, headers_bytes)
+
+    # DATA frame (if there's a body)
+    if body:
+        result += encode_frame(FRAME_DATA, body)
+
+    return result
+
+
+# =============================================================================
 # TESTS
 # =============================================================================
 
@@ -126,3 +162,14 @@ if __name__ == "__main__":
     print(f"   Output: {decoded}")
     success = decoded == headers
     print(f"   Round-trip: {'✓ Pass' if success else '✗ Fail'}")
+
+    # Test 6: Build request
+    request = build_request("GET", "/hello")
+    print(f"\n6. Build request (GET /hello):")
+    print(f"   Hex: {request.hex()}")
+
+    # Test 7: Build response
+    response = build_response(200, b"Hello World")
+    print(f"\n7. Build response (200, 'Hello World'):")
+    print(f"   Hex: {response.hex()}")
+    print(f"   Length: {len(response)} bytes")
