@@ -125,6 +125,51 @@ def build_response(status: int, body: bytes = b"") -> bytes:
     return result
 
 
+def parse_response(data: bytes) -> tuple[int, bytes]:
+    """
+    Parse HTTP/3 response.
+
+    Returns: (status_code, body)
+    """
+    offset = 0
+    status = None
+    body = b""
+
+    while offset < len(data):
+        frame_type, payload, consumed = decode_frame(data, offset)
+        offset += consumed
+
+        if frame_type == FRAME_HEADERS:
+            headers = decode_headers(payload)
+            status = int(headers[":status"])
+        elif frame_type == FRAME_DATA:
+            body += payload
+
+    return (status, body)
+
+
+def parse_request(data: bytes) -> tuple[str, str]:
+    """
+    Parse HTTP/3 request.
+
+    Returns: (method, path)
+    """
+    offset = 0
+    method = None
+    path = None
+
+    while offset < len(data):
+        frame_type, payload, consumed = decode_frame(data, offset)
+        offset += consumed
+
+        if frame_type == FRAME_HEADERS:
+            headers = decode_headers(payload)
+            method = headers.get(":method")
+            path = headers.get(":path")
+
+    return (method, path)
+
+
 # =============================================================================
 # TESTS
 # =============================================================================
@@ -173,3 +218,19 @@ if __name__ == "__main__":
     print(f"\n7. Build response (200, 'Hello World'):")
     print(f"   Hex: {response.hex()}")
     print(f"   Length: {len(response)} bytes")
+
+    # Test 8: Parse response (round-trip)
+    status, body = parse_response(response)
+    print(f"\n8. Parse response:")
+    print(f"   Status: {status}")
+    print(f"   Body:   {body}")
+    success = status == 200 and body == b"Hello World"
+    print(f"   Round-trip: {'✓ Pass' if success else '✗ Fail'}")
+
+    # Test 9: Parse request (round-trip)
+    method, path = parse_request(request)
+    print(f"\n9. Parse request:")
+    print(f"   Method: {method}")
+    print(f"   Path:   {path}")
+    success = method == "GET" and path == "/hello"
+    print(f"   Round-trip: {'✓ Pass' if success else '✗ Fail'}")
