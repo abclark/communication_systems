@@ -9,6 +9,11 @@ import crypto
 import varint
 import frames
 
+# Packet types
+PACKET_DATA = 0x01
+PACKET_INIT = 0x03
+PACKET_ACCEPT = 0x04
+
 
 class QUICClient:
     """A QUIC client connection."""
@@ -34,8 +39,15 @@ class QUICClient:
 
     def _do_handshake(self):
         """Perform QUIC handshake, return AES key."""
-        # TODO: implement
-        pass
+        private_key, public_key = crypto.generate_keypair()
+
+        init_packet = bytes([PACKET_INIT]) + self.conn_id + public_key
+        self.sock.sendto(init_packet, (self.host, self.port))
+
+        response, _ = self.sock.recvfrom(1024)
+        server_public = response[1:33]
+
+        return crypto.compute_shared_secret(private_key, server_public)
 
     def send(self, stream_id: int, data: bytes):
         """Send data on a stream."""
