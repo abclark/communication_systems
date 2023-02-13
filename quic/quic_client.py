@@ -51,8 +51,10 @@ class QUICClient:
 
     def send(self, stream_id: int, data: bytes):
         """Send data on a stream."""
-        # TODO: implement
-        pass
+        frame = frames.build_stream_frame(stream_id, 0, data)
+        encrypted = crypto.encrypt(self.aes_key, frame)
+        packet = bytes([PACKET_DATA]) + self.conn_id + encrypted
+        self.sock.sendto(packet, (self.host, self.port))
 
     def receive(self) -> bytes:
         """Receive data from server."""
