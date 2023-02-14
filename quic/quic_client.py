@@ -58,8 +58,15 @@ class QUICClient:
 
     def receive(self) -> bytes:
         """Receive data from server."""
-        # TODO: implement
-        pass
+        try:
+            packet, _ = self.sock.recvfrom(4096)
+        except BlockingIOError:
+            return None
+
+        encrypted = packet[1:]
+        decrypted = crypto.decrypt(self.aes_key, encrypted)
+        stream_id, offset, data = frames.parse_stream_frame(decrypted)
+        return data
 
     def close(self):
         """Close the connection."""
