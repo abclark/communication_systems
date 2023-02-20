@@ -39,19 +39,21 @@ class QUICClient:
 
     def _do_handshake(self):
         """Perform QUIC handshake, return AES key."""
-        private_key, public_key = crypto.generate_keypair()
+        private_key = crypto.generate_private_key()
+        public_key = crypto.compute_public_key(private_key)
 
-        init_packet = bytes([PACKET_INIT]) + self.conn_id + public_key
+        init_packet = bytes([PACKET_INIT]) + self.conn_id + public_key.to_bytes(256, 'big')
         self.sock.sendto(init_packet, (self.host, self.port))
 
-        response, _ = self.sock.recvfrom(1024)
-        server_public = response[1:33]
+        response, _ = self.sock.recvfrom(4096)
+        server_public = int.from_bytes(response[9:265], 'big')
 
-        return crypto.compute_shared_secret(private_key, server_public)
+        shared_secret = crypto.compute_shared_secret(server_public, private_key)
+        return crypto.derive_aes_key(shared_secret)
 
     def send(self, stream_id: int, data: bytes):
         """Send data on a stream."""
-        frame = frames.build_stream_frame(stream_id, 0, data)
+        frame = frames.encode_stream(stream_id, 0, data)
         encrypted = crypto.encrypt(self.aes_key, frame)
         packet = bytes([PACKET_DATA]) + self.conn_id + encrypted
         self.sock.sendto(packet, (self.host, self.port))
@@ -63,10 +65,13 @@ class QUICClient:
         except BlockingIOError:
             return None
 
-        encrypted = packet[1:]
+        encrypted = packet[9:]
         decrypted = crypto.decrypt(self.aes_key, encrypted)
-        stream_id, offset, data = frames.parse_stream_frame(decrypted)
-        return data
+        frame_type, frame_data, _ = frames.decode_frame(decrypted)
+        if frame_type == frames.FRAME_STREAM and frame_data:
+            stream_id, offset, data = frame_data
+            return data
+        return None
 
     def close(self):
         """Close the connection."""
