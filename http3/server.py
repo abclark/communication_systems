@@ -63,3 +63,43 @@ def send_udp(tun, src_ip, src_port, dest_ip, dest_port, payload):
     )
     ip_bytes = ip.to_bytes()
     tun.write(ip_bytes + udp_bytes)
+
+
+def main():
+    server_private = load_or_generate_server_key()
+    server_public = crypto.compute_public_key(server_private)
+
+    tun = TunDevice()
+
+    print("\nHTTP/3 Server listening on port 9000...")
+    print("Configure: sudo ifconfig utun<X> 192.168.100.1 192.168.100.2 netmask 255.255.255.0 up")
+    input("\nPress Enter after configuring interface...")
+
+    while True:
+        packet_bytes = tun.read()
+        if not packet_bytes:
+            continue
+
+        ip_header = IPHeader.from_bytes(packet_bytes)
+        if ip_header.protocol != protocols.PROTO_UDP:
+            continue
+
+        udp_bytes = packet_bytes[ip_header.ihl * 4:]
+        udp_header = UDPHeader.from_bytes(udp_bytes)
+
+        if udp_header.dest_port != UDP_PORT:
+            continue
+
+        payload = udp_header.payload
+        if len(payload) < 1:
+            continue
+
+        packet_type = payload[0]
+        # TODO: handle PACKET_INIT and PACKET_DATA
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nShutting down.")
