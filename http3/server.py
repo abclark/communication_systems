@@ -95,7 +95,27 @@ def main():
             continue
 
         packet_type = payload[0]
-        # TODO: handle PACKET_INIT and PACKET_DATA
+
+        if packet_type == PACKET_INIT:
+            conn_id = payload[1:9]
+            their_public = int.from_bytes(payload[9:265], 'big')
+            print(f"[{conn_id.hex()[:8]}] INIT received")
+
+            shared_secret = crypto.compute_shared_secret(their_public, server_private)
+            aes_key = crypto.derive_aes_key(shared_secret)
+
+            connections[conn_id] = {
+                'aes_key': aes_key,
+                'client_ip': ip_header.src_ip,
+                'client_port': udp_header.src_port
+            }
+            print(f"[{conn_id.hex()[:8]}] Connection established")
+
+            accept_payload = bytes([PACKET_ACCEPT]) + conn_id + server_public.to_bytes(256, 'big')
+            send_udp(tun, ip_header.dest_ip, UDP_PORT, ip_header.src_ip, udp_header.src_port, accept_payload)
+            print(f"[{conn_id.hex()[:8]}] ACCEPT sent\n")
+
+        # TODO: handle PACKET_DATA
 
 
 if __name__ == '__main__':
