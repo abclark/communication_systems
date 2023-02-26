@@ -115,7 +115,35 @@ def main():
             send_udp(tun, ip_header.dest_ip, UDP_PORT, ip_header.src_ip, udp_header.src_port, accept_payload)
             print(f"[{conn_id.hex()[:8]}] ACCEPT sent\n")
 
-        # TODO: handle PACKET_DATA
+        elif packet_type == PACKET_DATA:
+            conn_id = payload[1:9]
+            if conn_id not in connections:
+                print(f"[{conn_id.hex()[:8]}] Unknown connection, dropping")
+                continue
+
+            conn = connections[conn_id]
+            encrypted = payload[9:]
+            decrypted = crypto.decrypt(conn['aes_key'], encrypted)
+
+            frame_type, frame_data, _ = frames.decode_frame(decrypted)
+            if frame_type != frames.FRAME_STREAM:
+                continue
+
+            stream_id, offset, request_bytes = frame_data
+            method, path = parse_request(request_bytes)
+            print(f"[{conn_id.hex()[:8]}] Request: {method} {path}")
+
+            if path == "/hello":
+                response_bytes = build_response(200, b"Hello World")
+            else:
+                response_bytes = build_response(404, b"Not Found")
+
+            response_frame = frames.encode_stream(stream_id, 0, response_bytes)
+            response_encrypted = crypto.encrypt(conn['aes_key'], response_frame)
+            response_packet = bytes([PACKET_DATA]) + conn_id + response_encrypted
+
+            send_udp(tun, ip_header.dest_ip, UDP_PORT, ip_header.src_ip, udp_header.src_port, response_packet)
+            print(f"[{conn_id.hex()[:8]}] Response: 200 OK\n")
 
 
 if __name__ == '__main__':
