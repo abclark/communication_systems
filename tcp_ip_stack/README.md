@@ -4,7 +4,7 @@
 
 A from-scratch implementation of the TCP/IP protocol suite in Python. Bypasses the kernel's networking stack to manually parse IPv4 headers, respond to pings, and complete TCP handshakes — all in user-space code.
 
-https://github.com/user-attachments/assets/c8ad6bca-3144-4743-9d8c-84b9074d6cea
+https://github.com/user-attachments/assets/9326d3ba-b905-4b3a-8054-f8e5aa8022d7
 
 ---
 
