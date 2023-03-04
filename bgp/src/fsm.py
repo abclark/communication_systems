@@ -1,6 +1,5 @@
 from enum import Enum
 import threading
-import time
 
 class BGPFSMState(Enum):
     IDLE = 0
@@ -11,15 +10,16 @@ class BGPFSMState(Enum):
     ESTABLISHED = 5
 
 class BGPPeer:
-    def __init__(self, peer_ip):
+    def __init__(self, peer_ip, verbose_timers=False):
         self.peer_ip = peer_ip
         self.state = BGPFSMState.IDLE
-        
+        self.verbose_timers = verbose_timers
+
         # Timer attributes
         self.hold_time = 5
         self.hold_timer = None
         self.hold_timer_running = False
-        
+
         self.connect_retry_time = 10
         self.connect_retry_timer = None
         self.connect_retry_timer_running = False
@@ -28,6 +28,16 @@ class BGPPeer:
         self.open_delay_timer = None
         self.open_delay_timer_running = False
 
+    def _log_timer(self, msg):
+        """Only print timer messages if verbose_timers is True."""
+        if self.verbose_timers:
+            print(f"  [{self.peer_ip}] {msg}", flush=True)
+
+    def _log_transition(self, from_state, to_state, reason=""):
+        """Print a visual state transition."""
+        reason_str = f" ({reason})" if reason else ""
+        print(f"  {self.peer_ip}: {from_state.name} ──▶ {to_state.name}{reason_str}", flush=True)
+
     # --- Timer Management ---
     def _start_hold_timer(self):
         if self.hold_timer_running:
@@ -35,17 +45,17 @@ class BGPPeer:
         self.hold_timer = threading.Timer(self.hold_time, self.handle_event, ["HoldTimerExpires"])
         self.hold_timer.start()
         self.hold_timer_running = True
-        print(f"Peer {self.peer_ip}: Hold Timer started ({self.hold_time}s).", flush=True)
+        self._log_timer(f"Hold Timer started ({self.hold_time}s)")
 
     def _stop_hold_timer(self):
         if self.hold_timer_running:
             self.hold_timer.cancel()
             self.hold_timer_running = False
-            print(f"Peer {self.peer_ip}: Hold Timer stopped.", flush=True)
+            self._log_timer("Hold Timer stopped")
 
     def _reset_hold_timer(self):
         self._start_hold_timer()
-        print(f"Peer {self.peer_ip}: Hold Timer reset.", flush=True)
+        self._log_timer("Hold Timer reset")
 
     def _start_connect_retry_timer(self):
         if self.connect_retry_timer_running:
@@ -53,17 +63,17 @@ class BGPPeer:
         self.connect_retry_timer = threading.Timer(self.connect_retry_time, self.handle_event, ["ConnectRetryTimerExpires"])
         self.connect_retry_timer.start()
         self.connect_retry_timer_running = True
-        print(f"Peer {self.peer_ip}: Connect Retry Timer started ({self.connect_retry_time}s).", flush=True)
+        self._log_timer(f"Connect Retry Timer started ({self.connect_retry_time}s)")
 
     def _stop_connect_retry_timer(self):
         if self.connect_retry_timer_running:
             self.connect_retry_timer.cancel()
             self.connect_retry_timer_running = False
-            print(f"Peer {self.peer_ip}: Connect Retry Timer stopped.", flush=True)
+            self._log_timer("Connect Retry Timer stopped")
 
     def _reset_connect_retry_timer(self):
         self._start_connect_retry_timer()
-        print(f"Peer {self.peer_ip}: Connect Retry Timer reset.", flush=True)
+        self._log_timer("Connect Retry Timer reset")
 
     def _start_open_delay_timer(self):
         if self.open_delay_timer_running:
@@ -71,20 +81,22 @@ class BGPPeer:
         self.open_delay_timer = threading.Timer(self.open_delay_time, self.handle_event, ["OpenDelayTimerExpires"])
         self.open_delay_timer.start()
         self.open_delay_timer_running = True
-        print(f"Peer {self.peer_ip}: Open Delay Timer started ({self.open_delay_time}s).", flush=True)
+        self._log_timer(f"Open Delay Timer started ({self.open_delay_time}s)")
 
     def _stop_open_delay_timer(self):
         if self.open_delay_timer_running:
             self.open_delay_timer.cancel()
             self.open_delay_timer_running = False
-            print(f"Peer {self.peer_ip}: Open Delay Timer stopped.", flush=True)
+            self._log_timer("Open Delay Timer stopped")
 
     # --- FSM Event Handler ---
     def handle_event(self, event_type, *args, **kwargs):
+        old_state = self.state
+
         if self.state == BGPFSMState.IDLE:
             if event_type == "Start":
                 self._transition_to_connect()
-        
+
         elif self.state == BGPFSMState.CONNECT:
             if event_type == "TcpConnectionSuccess":
                 self._transition_to_opensent()
@@ -92,7 +104,7 @@ class BGPPeer:
                 self._transition_to_active()
             elif event_type == "TcpConnectionFails":
                 self._transition_to_active()
-        
+
         elif self.state == BGPFSMState.ACTIVE:
             if event_type == "TcpConnectionSuccess":
                 self._transition_to_opensent()
@@ -100,7 +112,7 @@ class BGPPeer:
                 self._transition_to_connect()
             elif event_type == "TcpConnectionFails":
                 self._transition_to_connect()
-        
+
         elif self.state == BGPFSMState.OPENSENT:
             if event_type == "ValidBGPOpenMessage":
                 self._stop_open_delay_timer()
@@ -114,7 +126,7 @@ class BGPPeer:
                 self._transition_to_idle()
             elif event_type == "BGPNotification":
                 self._transition_to_idle()
-        
+
         elif self.state == BGPFSMState.OPENCONFIRM:
             if event_type == "BGPKeepaliveMessage":
                 self._transition_to_established()
@@ -122,7 +134,7 @@ class BGPPeer:
                 self._transition_to_idle()
             elif event_type == "BGPNotification":
                 self._transition_to_idle()
-        
+
         elif self.state == BGPFSMState.ESTABLISHED:
             if event_type == "BGPUpdateMessage":
                 self._reset_hold_timer()
@@ -136,33 +148,39 @@ class BGPPeer:
     # --- State Transition Methods ---
     def _transition_to_idle(self):
         if self.state != BGPFSMState.IDLE:
+            old_state = self.state
             self._stop_hold_timer()
             self._stop_connect_retry_timer()
             self._stop_open_delay_timer()
             self.state = BGPFSMState.IDLE
-            print(f"Peer {self.peer_ip} transitioned to IDLE state.", flush=True)
+            self._log_transition(old_state, self.state)
 
     def _transition_to_connect(self):
+        old_state = self.state
         self.state = BGPFSMState.CONNECT
-        print(f"Peer {self.peer_ip} transitioned to CONNECT state.", flush=True)
+        self._log_transition(old_state, self.state)
         self._start_connect_retry_timer()
 
     def _transition_to_active(self):
+        old_state = self.state
         self.state = BGPFSMState.ACTIVE
-        print(f"Peer {self.peer_ip} transitioned to ACTIVE state.", flush=True)
+        self._log_transition(old_state, self.state)
         self._reset_connect_retry_timer()
 
     def _transition_to_opensent(self):
+        old_state = self.state
         self.state = BGPFSMState.OPENSENT
-        print(f"Peer {self.peer_ip} transitioned to OPENSENT state.", flush=True)
+        self._log_transition(old_state, self.state)
         self._stop_connect_retry_timer()
         self._start_open_delay_timer()
 
     def _transition_to_confirm(self):
+        old_state = self.state
         self.state = BGPFSMState.OPENCONFIRM
-        print(f"Peer {self.peer_ip} transitioned to OPENCONFIRM state.", flush=True)
+        self._log_transition(old_state, self.state)
 
     def _transition_to_established(self):
+        old_state = self.state
         self.state = BGPFSMState.ESTABLISHED
-        print(f"Peer {self.peer_ip} transitioned to ESTABLISHED state.", flush=True)
+        self._log_transition(old_state, self.state, "Session up!")
         self._start_hold_timer()
