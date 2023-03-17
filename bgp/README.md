@@ -4,7 +4,7 @@
 
 BGP (Border Gateway Protocol) is how the internet's backbone routers decide where to send traffic. When you visit google.com, BGP is why your packets know how to get from your ISP to Google's network. This project implements the two core BGP mechanisms: the session state machine and the path selection algorithm.
 
-<!-- Demo video will go here -->
+https://github.com/user-attachments/assets/d8b78f36-f9e4-4615-b322-7b6ea40de6bb
 
 ---
 
