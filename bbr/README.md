@@ -2,6 +2,12 @@
 
 This project implements BBR (Bottleneck Bandwidth and Round-trip propagation time), Google's congestion control algorithm. We'll extend our QUIC implementation to send at the optimal rate.
 
+## Demo
+
+https://github.com/user-attachments/assets/2ab48189-1617-44f8-8f02-9160cbe77607
+
+BBR discovering network capacity: STARTUP (exponential growth) → DRAIN (empty queues) → CRUISE (steady state). The cwnd adapts to the bottleneck bandwidth while keeping RTT close to RTprop.
+
 ---
 
 ## The Question
