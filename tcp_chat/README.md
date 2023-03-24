@@ -140,8 +140,7 @@ processes data in a series of rounds.
 ## 5. `openssl` Command Reference
 
 *   **Generate self-signed certificate and key:**
-    ```bash openssl req -x509 -newkey rsa:2048 -nodes \ -keyout ssl/key.pem
--out ssl/cert.pem -days 365 \ -subj "/CN=localhost" ```
+    ```bash openssl req -x509 -newkey rsa:2048 -nodes \ -keyout ssl/key.pem -out ssl/cert.pem -days 365 \ -subj "/CN=localhost" ```
 *   **View certificate contents:**
     ```bash openssl x509 -in ssl/cert.pem -text -noout ```
 *   **View private key contents:**
