@@ -2,6 +2,8 @@
 
 This project implements the QUIC protocol from the ground up. QUIC is the transport protocol underlying HTTP/3 and now carries over 30% of internet traffic.
 
+https://github.com/user-attachments/assets/77324a78-9503-4278-aa9a-a54332676ae7
+
 ---
 
 ## Why QUIC Exists
@@ -279,6 +281,8 @@ Google's QUIC worked but was proprietary. IETF standardized it as RFC 9000 (2021
 
 ## Project Status
 
+**Core QUIC: Complete ✅**
+
 - [x] Step 1: TCP Multiplexing (feel head-of-line blocking)
 - [x] Step 2: UDP Multiplexing (solve head-of-line blocking)
 - [x] Step 3: Reliability Layer (ACKs, retransmission)
@@ -286,7 +290,15 @@ Google's QUIC worked but was proprietary. IETF standardized it as RFC 9000 (2021
 - [x] Step 5: Connection IDs (connection migration)
 - [x] Step 6: Encryption (DH key exchange + AES-GCM)
 - [x] Step 7: QUIC Wire Format (varints + frames)
-- [ ] Step 8: Integration with custom stack
+- [ ] Step 8: Integration with HTTP/3 (in progress)
+
+### Next: HTTP/3 Integration
+
+This QUIC implementation is now being used by `http3/` project:
+- `sender.py` → HTTP/3 client transport
+- `udp_multiplexer.py` → HTTP/3 server transport
+
+See `http3/README.md` for integration plan.
 
 ---
 
