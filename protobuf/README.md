@@ -2,7 +2,7 @@
 
 This project implements Google's Protocol Buffers wire format from the ground up, following the historical development and design decisions that shaped the format.
 
-https://github.com/user-attachments/assets/9d61b9d5-0232-4ed9-a2a5-63e9d89b554b
+https://github.com/user-attachments/assets/346a3160-9a61-41e8-9a4e-819b522e28ca
 
 ---
 
