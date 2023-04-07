@@ -2,6 +2,8 @@
 
 This project implements HTTP/3 on top of our QUIC implementation.
 
+https://github.com/user-attachments/assets/b1d55a50-677f-444c-a1b4-0df78516be99
+
 ---
 
 ## What is HTTP/3?
