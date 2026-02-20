@@ -1,7 +1,5 @@
 # Communication Systems from Scratch
 
-The entire internet networking stack, built from scratch in Python.
-
 1. **tcp_chat** — Secure chat (TCP → TLS → E2EE with RSA + AES-GCM)
 2. **tcp_ip_stack** — User-space networking (TUN → IPv4 → ICMP → UDP → TCP)
 3. **quic** — QUIC from scratch (UDP → reliability → DH → 0-RTT → migration → frames)
